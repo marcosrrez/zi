@@ -5,7 +5,7 @@
 
 # ── zi shell wrapper ───────────────────────────────────────────────────────
 function zi() {
-  local known_subcommands=(ask fix "?" run man log watch explain desc code edit agent setup _route _palette _entries _correct)
+  local known_subcommands=(ask fix "?" run man log watch explain desc code edit agent chat setup update version --version -v _route _palette _entries _correct)
 
   if [[ -z "$1" ]]; then
     local result
@@ -38,6 +38,14 @@ function _zi_correct_buffer() {
 }
 zle -N _zi_correct_buffer
 bindkey '^ ' _zi_correct_buffer
+
+# ── preexec: track last command for zi fix context ────────────────────────
+# Saves the command to a file so zi fix has the right context even without Atuin
+function _zi_preexec() {
+  local _zi_data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zi"
+  [[ -d "$_zi_data_dir" ]] && printf '%s' "$1" > "$_zi_data_dir/last_cmd"
+}
+preexec_functions+=(_zi_preexec)
 
 # ── zi watch: auto-fix on non-zero exit ───────────────────────────────────
 _zi_watch_active=0

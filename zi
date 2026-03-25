@@ -5,9 +5,12 @@
 #        setup  _route  _palette  _entries  _correct
 
 _zi_main() {
+  local _ZI_VERSION="0.1.0"
   local _ZI_MODEL="${ZI_MODEL:-llama-3.3-70b-versatile}"
   local _ZI_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/zi/history.jsonl"
+  local _ZI_LAST_CMD="${XDG_DATA_HOME:-$HOME/.local/share}/zi/last_cmd"
   local _ZI_PALETTE="${XDG_CONFIG_HOME:-$HOME/.config}/zi/palette"
+  local _ZI_SESSION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zi/sessions"
   local _ZI_DB="${XDG_DATA_HOME:-$HOME/.local/share}/atuin/history.db"
   local _ZI_CLAUDE="${ZI_CLAUDE:-}"
 
@@ -18,8 +21,8 @@ _zi_main() {
     done
   fi
 
-  # Ensure log directory exists
-  mkdir -p "${_ZI_LOG:h}"
+  # Ensure data directories exist
+  mkdir -p "${_ZI_LOG:h}" "$_ZI_SESSION_DIR"
 
   # Source API key if not in env
   [[ -z "${GROQ_API_KEY:-$GROQ:-}" ]] && [[ -f "$HOME/.api_keys" ]] && source "$HOME/.api_keys"
@@ -42,6 +45,44 @@ print(json.dumps({
   "max_tokens": int(os.environ.get("ZI_MAX", "600")),
   "temperature": 0.3
 }))' <<< "$prompt") || return 1
+
+    local raw
+    raw=$(curl -sf https://api.groq.com/openai/v1/chat/completions \
+      -H "Authorization: Bearer $_ZI_KEY" \
+      -H "Content-Type: application/json" \
+      -d "$payload") || { printf 'zi: API request failed\n' >&2; return 1; }
+
+    python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print('zi: ' + d['error'].get('message', 'API error'), file=sys.stderr)
+    sys.exit(1)
+print(d['choices'][0]['message']['content'].strip())
+" <<< "$raw"
+  }
+
+  # ── Groq API — multi-turn chat ────────────────────────────────────────
+  _zi_groq_chat() {
+    local messages_json="$1" system_prompt="$2" max_tokens="${3:-800}"
+    [[ -z "$_ZI_KEY" ]] && { printf 'zi: GROQ_API_KEY not set\n' >&2; return 1; }
+
+    local payload
+    payload=$(ZI_MODEL="$_ZI_MODEL" ZI_MAX="$max_tokens" python3 -c "
+import json, sys, os
+messages = json.loads(sys.argv[1])
+system = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+all_msgs = []
+if system:
+    all_msgs.append({'role': 'system', 'content': system})
+all_msgs.extend(messages)
+print(json.dumps({
+  'model': os.environ['ZI_MODEL'],
+  'messages': all_msgs,
+  'max_tokens': int(os.environ.get('ZI_MAX', '800')),
+  'temperature': 0.7
+}))
+" "$messages_json" "${system_prompt:-}") || return 1
 
     local raw
     raw=$(curl -sf https://api.groq.com/openai/v1/chat/completions \
@@ -94,11 +135,13 @@ print(json.dumps(e))
 " "$mode" "$query" "$response" >> "$_ZI_LOG" 2>/dev/null
   }
 
-  # ── Last failed command (Atuin or fc fallback) ─────────────────────────
+  # ── Last failed command (Atuin → preexec file → fc fallback) ─────────
   _zi_last_failed() {
     if [[ -f "$_ZI_DB" ]]; then
       sqlite3 -separator '|' "$_ZI_DB" \
         "SELECT command, exit FROM history WHERE command NOT LIKE 'zi%' AND exit != 0 ORDER BY timestamp DESC LIMIT 1;" 2>/dev/null
+    elif [[ -f "$_ZI_LAST_CMD" ]]; then
+      cat "$_ZI_LAST_CMD"
     else
       fc -ln -1 2>/dev/null | sed 's/^[[:space:]]//'
     fi
@@ -133,8 +176,11 @@ zi      |zi agent <task>               |Claude fully autonomous
 zi      |zi desc <cmd>                 |Explain what a command does
 zi      |zi fix                        |Explain + fix last error
 zi      |zi man <cmd>                  |Summarize man page
+zi      |zi chat                       |Start or resume a conversation
+zi      |zi chat list                  |List saved chat sessions
 zi      |zi watch on                   |Auto-fix on non-zero exit
 zi      |zi watch off                  |Disable auto-fix
+zi      |zi update                     |Update zi to latest version
 ENTRIES
   }
 
@@ -196,6 +242,133 @@ ENTRIES
 
   # ── Modes ──────────────────────────────────────────────────────────────
   case "$1" in
+
+    "version"|"--version"|"-v")
+      printf 'zi v%s\n' "$_ZI_VERSION"
+      ;;
+
+    "update")
+      local _bin_path
+      _bin_path=$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")
+      local _zsh_path="${XDG_CONFIG_HOME:-$HOME/.config}/zi/zi.zsh"
+      local _base="https://raw.githubusercontent.com/marcosrrez/zi/main"
+
+      printf '\033[2mchecking for updates...\033[0m\n'
+      local _remote_ver
+      _remote_ver=$(curl -sf "$_base/zi" | grep -m1 '^  local _ZI_VERSION=' | sed 's/.*"\([0-9.]*\)".*/\1/') || {
+        printf 'zi: could not reach GitHub\n' >&2; return 1
+      }
+
+      if [[ "$_remote_ver" == "$_ZI_VERSION" ]]; then
+        printf 'zi is up to date (v%s)\n' "$_ZI_VERSION"
+        return 0
+      fi
+
+      printf 'Updating v%s → v%s\n' "$_ZI_VERSION" "$_remote_ver"
+      curl -fsSL "$_base/zi" -o "${_bin_path}.tmp" \
+        && chmod +x "${_bin_path}.tmp" \
+        && mv "${_bin_path}.tmp" "$_bin_path" || {
+          rm -f "${_bin_path}.tmp"
+          printf 'zi: update failed\n' >&2; return 1
+        }
+      curl -fsSL "$_base/zi.zsh" -o "$_zsh_path" 2>/dev/null || true
+      printf '\033[0;32mUpdated to v%s\033[0m\n' "$_remote_ver"
+      printf 'Restart your shell or run: source %s\n' "$_zsh_path"
+      ;;
+
+    "chat")
+      shift
+      local _subcmd="$1"
+
+      # zi chat list
+      if [[ "$_subcmd" == "list" ]]; then
+        local _found=0
+        for _f in "$_ZI_SESSION_DIR"/*.jsonl(N); do
+          local _name="${_f:t:r}"
+          local _count
+          _count=$(wc -l < "$_f" | tr -d ' ')
+          printf '  \033[1;35m%-20s\033[0m %s messages\n' "$_name" "$(( _count / 2 ))"
+          _found=1
+        done
+        [[ $_found -eq 0 ]] && printf 'zi: no chat sessions yet\n'
+        return 0
+      fi
+
+      local _session="${_subcmd:-default}"
+      local _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
+      local _system="$(_zi_context)
+You are zi, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
+
+      printf '\033[2mzi chat — session: \033[1;35m%s\033[0m\n' "$_session"
+      if [[ -f "$_session_file" ]]; then
+        local _msg_count
+        _msg_count=$(wc -l < "$_session_file" | tr -d ' ')
+        printf '\033[2mResuming (%d messages). /exit /list /new <name> /clear /help\033[0m\n\n' "$(( _msg_count / 2 ))"
+      else
+        printf '\033[2mNew session. /exit /list /new <name> /clear /help\033[0m\n\n'
+      fi
+
+      while true; do
+        printf '\033[1;35mYou › \033[0m'
+        read -r _input || break
+        [[ -z "$_input" ]] && continue
+
+        case "$_input" in
+          /exit|/quit)
+            printf '\033[2msession saved: %s\033[0m\n' "$_session"
+            break ;;
+          /list)
+            _zi_main chat list; continue ;;
+          /new*)
+            local _new="${_input#/new}"
+            _new="${_new## }"
+            _session="${_new:-default}"
+            _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
+            printf '\033[2mswitched to: %s\033[0m\n' "$_session"
+            continue ;;
+          /clear)
+            > "$_session_file"
+            printf '\033[2msession cleared\033[0m\n'
+            continue ;;
+          /help)
+            printf '  /exit        quit (session auto-saved)\n'
+            printf '  /list        show all sessions\n'
+            printf '  /new <name>  switch to or create named session\n'
+            printf '  /clear       clear current session history\n'
+            continue ;;
+        esac
+
+        # Append user message to session file
+        python3 -c "
+import json, sys
+print(json.dumps({'role': 'user', 'content': sys.argv[1]}))" "$_input" >> "$_session_file"
+
+        # Build messages array from session file
+        local _messages
+        _messages=$(python3 -c "
+import json, sys, os
+path = sys.argv[1]
+msgs = []
+if os.path.exists(path):
+    for line in open(path):
+        try: msgs.append(json.loads(line))
+        except: pass
+print(json.dumps(msgs))" "$_session_file")
+
+        printf '\033[2mthinking...\033[0m'
+        local _response
+        _response=$(_zi_groq_chat "$_messages" "$_system") || { printf '\r\033[K'; continue; }
+        printf '\r\033[K'
+
+        printf '\033[1;36mzi  › \033[0m%s\n\n' "$_response"
+        _zi_log_entry "chat" "$_input" "$_response"
+
+        # Append assistant response
+        python3 -c "
+import json, sys
+print(json.dumps({'role': 'assistant', 'content': sys.argv[1]}))" "$_response" >> "$_session_file"
+      done
+      ;;
 
     "_palette")
       _zi_entries \
@@ -729,6 +902,8 @@ zi — terminal intelligence
   zi setup            interactive setup wizard (run this first)
   zi <anything>       smart intent routing (auto-detects mode)
   zi ask <q>          natural language → shell command
+  zi chat [session]   persistent multi-turn conversation
+  zi chat list        list all saved chat sessions
   zi code <task>      generate code (Claude CLI or Groq)
   zi edit <task>      Claude edits files autonomously (prompts for bash)
   zi agent <task>     Claude fully autonomous — edits + runs commands
@@ -740,6 +915,8 @@ zi — terminal intelligence
   zi run <cmd>        run and copy output to clipboard
   zi log [filter]     view recent queries (optional search term)
   zi watch on|off     auto-fix on non-zero exit
+  zi update           update zi to the latest version
+  zi version          show current version
 
   Ctrl+Space          AI-correct current buffer (ZLE)
 

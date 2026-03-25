@@ -44,7 +44,11 @@ Then restart your shell. That's it.
 | `zi explain <file>` | Explain what a file does |
 | `zi run <cmd>` | Run a command and copy output to clipboard |
 | `zi log [filter]` | Browse recent zi queries |
+| `zi chat [session]` | Persistent multi-turn conversation with context |
+| `zi chat list` | List all saved chat sessions |
 | `zi watch on\|off` | Auto-run `zi fix` whenever a command fails |
+| `zi update` | Update zi to the latest version |
+| `zi version` | Show current version |
 
 **Keyboard shortcut:** `Ctrl+Space` — AI-correct the current command buffer in-place.
 
