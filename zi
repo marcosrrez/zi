@@ -1,0 +1,756 @@
+#!/usr/bin/env zsh
+# zi — terminal intelligence layer
+# https://github.com/marcosrrez/zi
+# Modes: ask  fix  desc  code  edit  agent  man  ?  explain  run  log  watch
+#        setup  _route  _palette  _entries  _correct
+
+_zi_main() {
+  local _ZI_MODEL="${ZI_MODEL:-llama-3.3-70b-versatile}"
+  local _ZI_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/zi/history.jsonl"
+  local _ZI_PALETTE="${XDG_CONFIG_HOME:-$HOME/.config}/zi/palette"
+  local _ZI_DB="${XDG_DATA_HOME:-$HOME/.local/share}/atuin/history.db"
+  local _ZI_CLAUDE="${ZI_CLAUDE:-}"
+
+  # Resolve claude binary
+  if [[ -z "$_ZI_CLAUDE" ]]; then
+    for _candidate in "$HOME/.local/bin/claude" "$(command -v claude 2>/dev/null)"; do
+      [[ -x "$_candidate" ]] && { _ZI_CLAUDE="$_candidate"; break; }
+    done
+  fi
+
+  # Ensure log directory exists
+  mkdir -p "${_ZI_LOG:h}"
+
+  # Source API key if not in env
+  [[ -z "${GROQ_API_KEY:-$GROQ:-}" ]] && [[ -f "$HOME/.api_keys" ]] && source "$HOME/.api_keys"
+  local _ZI_KEY="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+
+  # ── Groq API ───────────────────────────────────────────────────────────
+  _zi_groq() {
+    local prompt="$1" max_tokens="${2:-600}"
+    [[ -z "$_ZI_KEY" ]] && {
+      printf 'zi: GROQ_API_KEY not set. Get a free key at console.groq.com\n' >&2
+      return 1
+    }
+
+    local payload
+    payload=$(ZI_MODEL="$_ZI_MODEL" ZI_MAX="$max_tokens" python3 -c '
+import json, sys, os
+print(json.dumps({
+  "model": os.environ["ZI_MODEL"],
+  "messages": [{"role": "user", "content": sys.stdin.read()}],
+  "max_tokens": int(os.environ.get("ZI_MAX", "600")),
+  "temperature": 0.3
+}))' <<< "$prompt") || return 1
+
+    local raw
+    raw=$(curl -sf https://api.groq.com/openai/v1/chat/completions \
+      -H "Authorization: Bearer $_ZI_KEY" \
+      -H "Content-Type: application/json" \
+      -d "$payload") || { printf 'zi: API request failed\n' >&2; return 1; }
+
+    python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print('zi: ' + d['error'].get('message', 'API error'), file=sys.stderr)
+    sys.exit(1)
+print(d['choices'][0]['message']['content'].strip())
+" <<< "$raw"
+  }
+
+  # ── Auto-detect installed tools for context ────────────────────────────
+  _zi_detect_tools() {
+    local tools=()
+    local candidates=(
+      git gh docker brew npm node python3 ruby go cargo make cmake
+      jq yq fzf fd rg bat eza dust duf zoxide atuin lazygit tmux
+      zellij nvim vim code kubectl terraform ansible ffmpeg rsync
+    )
+    for t in "${candidates[@]}"; do
+      command -v "$t" &>/dev/null && tools+=("$t")
+    done
+    printf '%s' "${(j:, :)tools}"
+  }
+
+  # ── Shell context injected into every prompt ───────────────────────────
+  _zi_context() {
+    local branch os_name tools
+    branch=$(git branch --show-current 2>/dev/null)
+    os_name=$(uname -s)
+    tools=$(_zi_detect_tools)
+    printf 'OS: %s, shell: zsh, cwd: %s%s\nAvailable tools: %s\n' \
+      "$os_name" "$PWD" "${branch:+, git: $branch}" "$tools"
+  }
+
+  # ── Logging ────────────────────────────────────────────────────────────
+  _zi_log_entry() {
+    local mode="$1" query="$2" response="$3"
+    python3 -c "
+import json, sys
+from datetime import datetime, timezone
+e = {'ts': datetime.now(timezone.utc).isoformat(), 'mode': sys.argv[1], 'query': sys.argv[2], 'response': sys.argv[3]}
+print(json.dumps(e))
+" "$mode" "$query" "$response" >> "$_ZI_LOG" 2>/dev/null
+  }
+
+  # ── Last failed command (Atuin or fc fallback) ─────────────────────────
+  _zi_last_failed() {
+    if [[ -f "$_ZI_DB" ]]; then
+      sqlite3 -separator '|' "$_ZI_DB" \
+        "SELECT command, exit FROM history WHERE command NOT LIKE 'zi%' AND exit != 0 ORDER BY timestamp DESC LIMIT 1;" 2>/dev/null
+    else
+      fc -ln -1 2>/dev/null | sed 's/^[[:space:]]//'
+    fi
+  }
+
+  # ── Default palette entries ────────────────────────────────────────────
+  _zi_default_entries() {
+    cat << 'ENTRIES'
+git     |git status                    |Working tree status
+git     |git log --oneline --graph -20 |Commit graph (last 20)
+git     |git diff --staged             |Review staged changes
+git     |git stash                     |Stash current changes
+git     |git stash pop                 |Restore latest stash
+git     |lazygit                       |Git TUI (if installed)
+nav     |cd -                          |Jump to previous directory
+nav     |ls -la                        |List all files with details
+files   |find . -name <pattern>        |Find files by name
+files   |rg <pattern>                  |Search file contents (ripgrep)
+files   |bat <file>                    |View file with syntax highlight
+files   |du -sh *                      |Directory sizes
+dev     |docker ps                     |List running containers
+dev     |docker compose up -d          |Start compose services
+dev     |npm run dev                   |Start dev server
+dev     |make                          |Run default make target
+sys     |top                           |System monitor
+sys     |df -h                         |Disk usage overview
+zi      |zi <anything>                 |Smart intent routing
+zi      |zi ask <query>                |Natural language to command
+zi      |zi code <task>                |Generate code (Claude or Groq)
+zi      |zi edit <task>                |Claude edits files autonomously
+zi      |zi agent <task>               |Claude fully autonomous
+zi      |zi desc <cmd>                 |Explain what a command does
+zi      |zi fix                        |Explain + fix last error
+zi      |zi man <cmd>                  |Summarize man page
+zi      |zi watch on                   |Auto-fix on non-zero exit
+zi      |zi watch off                  |Disable auto-fix
+ENTRIES
+  }
+
+  # ── Palette entries (defaults + user overrides) ────────────────────────
+  _zi_entries() {
+    _zi_default_entries
+    [[ -f "$_ZI_PALETTE" ]] && cat "$_ZI_PALETTE"
+  }
+
+  # ── Intent router ──────────────────────────────────────────────────────
+  _zi_route() {
+    local input="$*"
+    local lower="${input:l}"
+    local first_word="${input%% *}"
+
+    # File path that exists → explain
+    if [[ "$first_word" == /* || "$first_word" == ~* || "$first_word" == ./* ]]; then
+      local resolved="${first_word/#\~/$HOME}"
+      [[ -f "$resolved" ]] && { _zi_main explain "$resolved"; return; }
+    fi
+
+    # Error/failure intent → fix
+    if echo "$lower" | grep -qE '(why.*(fail|error|broke|not work|crash)|fix (this|the|my)|what.*(went wrong|is wrong))'; then
+      _zi_main fix
+      return
+    fi
+
+    # File editing intent → edit
+    if echo "$lower" | grep -qE '^(refactor|add|remove|update|rename|fix|change|edit|modify).*(in |to |the ).*(\.js|\.ts|\.py|\.sh|\.zsh|\.md|\.json|\.yaml|\.go|\.rb|file|function|class|component)'; then
+      _zi_main edit "$input"
+      return
+    fi
+
+    # "what does X do" or "explain X" → desc
+    if echo "$lower" | grep -qE '^(what does|explain|describe|what is) .*(command|flag|option|do\??$)'; then
+      local subject
+      subject=$(echo "$input" | sed -E 's/^(what does|explain|describe|what is) //i' \
+                              | sed -E 's/ (command|flag|option|do)\??$//i' \
+                              | awk '{print $1}')
+      [[ -n "$subject" ]] && { _zi_main desc "$subject"; return; }
+    fi
+
+    # Known CLI binary with few words → desc
+    local known_clis=(git ls find grep awk sed curl wget ssh docker brew npm node python python3 ruby go cargo make cmake gcc ffmpeg rsync tar jq yq fzf fd rg bat eza dust duf zoxide lazygit gh kubectl terraform)
+    if (( ${known_clis[(Ie)$first_word]} )) && [[ $(echo "$input" | wc -w) -le 6 ]]; then
+      _zi_main desc "$input"
+      return
+    fi
+
+    # Code generation → code
+    if echo "$lower" | grep -qE '^(write|create|build|generate|make me|scaffold|draft).*(script|function|class|program|tool|app|api|server|cli|hook|plugin|module|file)'; then
+      _zi_main code "$input"
+      return
+    fi
+
+    # Default → ask
+    _zi_main ask "$input"
+  }
+
+  # ── Modes ──────────────────────────────────────────────────────────────
+  case "$1" in
+
+    "_palette")
+      _zi_entries \
+        | fzf \
+          --delimiter='|' \
+          --with-nth='1,3' \
+          --nth='2,3' \
+          --prompt='zi › ' \
+          --height='40%' \
+          --border='rounded' \
+          --color='prompt:#c6a0f6,pointer:#ed8796,border:#363a4f,hl:#eed49f,hl+:#eed49f,info:#6e738d' \
+          --header='Enter: run   Ctrl+y: copy   Esc: cancel' \
+          --bind="ctrl-y:execute-silent(echo {2} | xargs | pbcopy)+abort" \
+          --preview='printf "  \033[1;35m%s\033[0m\n  \033[2m%s\033[0m\n" "$(echo {2} | xargs)" "$(echo {3} | xargs)"' \
+          --preview-window='down:3:wrap' \
+      | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}'
+      ;;
+
+    "_entries")
+      _zi_entries
+      ;;
+
+    "_correct")
+      shift
+      [[ -z "$*" ]] && return 0
+      _zi_groq "Fix typos or syntax errors in this shell command on $(uname -s). Reply with ONLY the corrected command, no backticks, no explanation:
+$*"
+      ;;
+
+    "_route")
+      shift
+      _zi_route "$@"
+      ;;
+
+    "ask")
+      shift
+      local q="$*"
+      [[ -z "$q" ]] && { printf 'zi ask › '; read -r q; }
+      printf '\033[2mthinking...\033[0m\n'
+      local cmd
+      cmd=$(_zi_groq "$(_zi_context)
+
+Convert to a shell one-liner (pipes, subshells, and command substitution are fine). Reply with ONLY the command, no backticks, no explanation:
+$q") || return 1
+      printf '\n  \033[1;35m%s\033[0m\n\n' "$cmd"
+      printf 'Run? [y/N/c=copy] '
+      read -r ans
+      case "$ans" in
+        y|Y) _zi_log_entry "ask" "$q" "$cmd"; eval "$cmd" ;;
+        c|C) printf '%s' "$cmd" | pbcopy; printf '\033[2mcopied\033[0m\n'; _zi_log_entry "ask" "$q" "$cmd" ;;
+        *)   _zi_log_entry "ask" "$q" "$cmd" ;;
+      esac
+      ;;
+
+    "fix")
+      local raw_last cmd exit_code err
+      raw_last=$(_zi_last_failed)
+      if [[ "$raw_last" == *'|'* ]]; then
+        cmd="${raw_last%%|*}"
+        exit_code="${raw_last##*|}"
+      else
+        cmd="$raw_last"
+        exit_code="?"
+      fi
+
+      if [[ ! -t 0 ]]; then
+        err=$(cat)
+      elif [[ -n "$TMUX" ]]; then
+        err=$(tmux capture-pane -p -S - 2>/dev/null | tail -60)
+      else
+        printf '\033[2mlast failed: %s (exit: %s)\033[0m\n' "$cmd" "$exit_code"
+        printf 'Paste error output (Ctrl+D to skip, or pipe: cmd 2>&1 | zi fix):\n'
+        err=$(cat)
+      fi
+
+      printf '\033[2manalyzing...\033[0m\n'
+      local response
+      response=$(_zi_groq "Command: $cmd
+Exit code: $exit_code
+Error output:
+$err
+
+Reply in this exact format:
+Issue: <one line explanation>
+Fix:   <corrected command only>") || return 1
+      printf '\n%s\n\n' "$response"
+      _zi_log_entry "fix" "$cmd" "$response"
+      ;;
+
+    "desc")
+      shift
+      [[ -z "$*" ]] && { printf 'Usage: zi desc <command or snippet>\n'; return 1; }
+      printf '\033[2mexplaining...\033[0m\n'
+      local response
+      response=$(_zi_groq "Explain what this shell command or snippet does, in plain English. One sentence summary, then bullet any non-obvious flags or behaviors. No preamble:
+$*" 300) || return 1
+      printf '\n%s\n\n' "$response"
+      _zi_log_entry "desc" "$*" "$response"
+      ;;
+
+    "code")
+      shift
+      local q="$*"
+      [[ -z "$q" ]] && { printf 'zi code › '; read -r q; }
+      if [[ -x "$_ZI_CLAUDE" ]]; then
+        printf '\033[2mrouting to Claude...\033[0m\n'
+        local prompt="$(_zi_context)
+
+Write clean, working code for the following task. Include only the code and brief inline comments where non-obvious. No preamble, no markdown fences:
+$q"
+        _zi_log_entry "code" "$q" "(claude)"
+        printf '%s' "$prompt" | "$_ZI_CLAUDE" --print -
+      else
+        printf '\033[2mthinking...\033[0m\n'
+        local response
+        response=$(_zi_groq "$(_zi_context)
+
+Write clean, working code for the following task. Include only the code and brief inline comments where non-obvious. No preamble:
+$q" 1200) || return 1
+        printf '\n%s\n\n' "$response"
+        _zi_log_entry "code" "$q" "$response"
+      fi
+      ;;
+
+    "edit")
+      shift
+      local q="$*"
+      [[ -z "$q" ]] && { printf 'zi edit › '; read -r q; }
+      [[ ! -x "$_ZI_CLAUDE" ]] && { printf 'zi: claude CLI not found. Install Claude Code to use zi edit.\n' >&2; return 1; }
+      printf '\033[2mzi edit — Claude will edit files autonomously (bash requires approval)\033[0m\n'
+      printf '\033[2mtask: %s\033[0m\n\n' "$q"
+      _zi_log_entry "edit" "$q" "(claude:acceptEdits)"
+      "$_ZI_CLAUDE" --permission-mode acceptEdits "$q"
+      ;;
+
+    "agent")
+      shift
+      local q="$*"
+      [[ -z "$q" ]] && { printf 'zi agent › '; read -r q; }
+      [[ ! -x "$_ZI_CLAUDE" ]] && { printf 'zi: claude CLI not found. Install Claude Code to use zi agent.\n' >&2; return 1; }
+      printf '\033[1;33mWARNING: zi agent bypasses all permission checks.\033[0m\n'
+      printf '\033[1;33mClaude will edit files and run commands without asking.\033[0m\n'
+      printf 'Continue? [y/N] '
+      read -r confirm
+      [[ "$confirm" != y && "$confirm" != Y ]] && { printf '\033[2maborted\033[0m\n'; return 0; }
+      printf '\n\033[2mzi agent — running autonomously...\033[0m\n\n'
+      _zi_log_entry "agent" "$q" "(claude:bypassPermissions)"
+      "$_ZI_CLAUDE" --permission-mode bypassPermissions "$q"
+      ;;
+
+    "man")
+      shift
+      [[ -z "$1" ]] && { printf 'Usage: zi man <command>\n'; return 1; }
+      local mantext
+      mantext=$(man "$1" 2>/dev/null | col -bx | head -200) || {
+        printf 'zi: no man page for %s\n' "$1" >&2; return 1
+      }
+      printf '\033[2mreading %s man page...\033[0m\n' "$1"
+      local response
+      response=$(_zi_groq "Summarize the most useful flags and common usage patterns for '$1'. 10 bullet points max, practical examples only, no preamble:
+$mantext" 300) || return 1
+      printf '\n%s\n\n' "$response"
+      _zi_log_entry "man" "$1" "$response"
+      ;;
+
+    "?")
+      shift
+      local text
+      if [[ ! -t 0 ]]; then
+        text=$(cat)
+      else
+        text="$*"
+      fi
+      [[ -z "$text" ]] && { printf 'Usage: zi ? <text>  or  cmd | zi ?\n'; return 1; }
+      printf '\033[2mexplaining...\033[0m\n'
+      local response
+      response=$(_zi_groq "Explain what this terminal output means and what action (if any) to take. Be concise. No preamble:
+$text" 200) || return 1
+      printf '\n%s\n\n' "$response"
+      _zi_log_entry "?" "$text" "$response"
+      ;;
+
+    "explain")
+      shift
+      local target="$1"
+      [[ -z "$target" ]] && { printf 'Usage: zi explain <file>\n'; return 1; }
+      [[ ! -f "$target" ]] && { printf 'zi: file not found: %s\n' "$target" >&2; return 1; }
+      local content
+      content=$(head -200 "$target")
+      printf '\033[2mexplaining %s...\033[0m\n' "$target"
+      local response
+      response=$(_zi_groq "Explain what this file does in plain English. What it is, what it does, and any non-obvious details. No preamble:
+--- $target ---
+$content" 400) || return 1
+      printf '\n%s\n\n' "$response"
+      _zi_log_entry "explain" "$target" "$response"
+      ;;
+
+    "run")
+      shift
+      [[ -z "$*" ]] && { printf 'Usage: zi run <command>\n'; return 1; }
+      local out code
+      out=$(zsh -c "$*" 2>&1); code=$?
+      printf '%s\n' "$out"
+      printf '%s' "$out" | pbcopy 2>/dev/null || printf '%s' "$out" | xclip -selection clipboard 2>/dev/null
+      printf '\033[2mcopied to clipboard\033[0m\n'
+      _zi_log_entry "run" "$*" "$out"
+      return $code
+      ;;
+
+    "log")
+      [[ -f "$_ZI_LOG" ]] || { printf 'zi: no history yet\n'; return 0; }
+      local filter="${2:-}"
+      python3 -c "
+import json, sys
+lines = open('$_ZI_LOG').readlines()
+filt = sys.argv[1].lower() if len(sys.argv) > 1 else ''
+matches = []
+for line in lines:
+    try:
+        e = json.loads(line)
+        if filt and filt not in e.get('query','').lower() and filt not in e.get('mode','').lower():
+            continue
+        matches.append(e)
+    except: pass
+for e in matches[-20:]:
+    ts = e.get('ts','')[:16].replace('T',' ')
+    mode = e.get('mode','?')
+    query = e.get('query','')[:70]
+    print(f'  \033[2m{ts}\033[0m  \033[1;35m{mode:<6}\033[0m  {query}')
+" "$filter"
+      ;;
+
+    "watch")
+      shift
+      case "$1" in
+        on)  touch "$HOME/.zi_watch";  printf '\033[2mzi watch enabled\033[0m\n' ;;
+        off) rm -f "$HOME/.zi_watch";  printf '\033[2mzi watch disabled\033[0m\n' ;;
+        *)   [[ -f "$HOME/.zi_watch" ]] && printf 'zi watch: on\n' || printf 'zi watch: off\n' ;;
+      esac
+      ;;
+
+    "setup")
+      # ── Helper output functions ──────────────────────────────────────────
+      _s_line()  { printf '\n'; }
+      _s_head()  { printf '\033[1;35m%s\033[0m\n' "$*"; }
+      _s_ok()    { printf '  \033[0;32m✔\033[0m  %s\n' "$*"; }
+      _s_warn()  { printf '  \033[0;33m!\033[0m  %s\n' "$*"; }
+      _s_info()  { printf '  \033[2m%s\033[0m\n' "$*"; }
+      _s_ask()   { printf '  \033[1m%s\033[0m [y/N] ' "$*"; }
+      _s_input() { printf '  \033[1m%s\033[0m › ' "$*"; }
+      _s_tip()   { printf '  \033[0;36m→\033[0m  %s\n' "$*"; }
+
+      local _ZI_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
+      local _ZI_PALETTE_FILE="$_ZI_CONFIG_DIR/palette"
+      local _ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
+      local _BEGINNER=0
+      local _WORKFLOW=""
+      local _INSTALL_CMD=""
+
+      # detect package manager
+      if command -v brew &>/dev/null; then
+        _INSTALL_CMD="brew install"
+      elif command -v apt-get &>/dev/null; then
+        _INSTALL_CMD="sudo apt-get install -y"
+      elif command -v dnf &>/dev/null; then
+        _INSTALL_CMD="sudo dnf install -y"
+      fi
+
+      clear 2>/dev/null || true
+      printf '\033[1;35m'
+      cat << 'BANNER'
+
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+           zi — terminal intelligence
+       ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+
+BANNER
+      printf '\033[0m'
+      _s_info "Let's get you set up. This takes about 2 minutes."
+      _s_info "You can re-run 'zi setup' any time to change your config."
+      _s_line
+
+      # ── Step 1: Experience level ───────────────────────────────────────
+      _s_head "Step 1 of 5 — Your experience level"
+      _s_line
+      printf '  How comfortable are you with the command line?\n\n'
+      printf '    1) New to this — I could use some guidance\n'
+      printf '    2) I know my way around\n'
+      printf '    3) Power user — just get out of my way\n'
+      _s_line
+      _s_input "Enter 1, 2, or 3"
+      read -r _level
+      case "$_level" in
+        1) _BEGINNER=1 ;;
+        3) _BEGINNER=0 ;;
+        *) _BEGINNER=0 ;;
+      esac
+
+      if [[ $_BEGINNER -eq 1 ]]; then
+        _s_line
+        _s_info "Got it. I'll explain things as we go."
+        _s_info "zi is a tool that lets you talk to your terminal in plain English."
+        _s_info "Instead of memorizing commands, you just describe what you want."
+        _s_line
+        _s_tip "Example: zi find all files larger than 100MB"
+        _s_tip "Example: zi why did that fail"
+        _s_tip "Example: zi write a script to rename all my photos"
+      fi
+
+      # ── Step 2: API key ────────────────────────────────────────────────
+      _s_line
+      _s_head "Step 2 of 5 — Groq API key"
+      _s_line
+
+      local _current_key="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+      if [[ -z "$_current_key" ]] && [[ -f "$HOME/.api_keys" ]]; then
+        source "$HOME/.api_keys" 2>/dev/null
+        _current_key="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+      fi
+
+      if [[ -n "$_current_key" ]]; then
+        _s_ok "Groq API key found (${_current_key:0:8}...)"
+      else
+        if [[ $_BEGINNER -eq 1 ]]; then
+          _s_info "zi uses Groq to understand your requests. Groq is free."
+          _s_info "Go to console.groq.com, sign up, and create an API key."
+          _s_info "It takes about 60 seconds and costs nothing."
+        else
+          _s_warn "No Groq API key found. Get one free at console.groq.com"
+        fi
+        _s_line
+        _s_input "Paste your Groq API key (Enter to skip)"
+        read -r _key
+        if [[ -n "$_key" ]]; then
+          mkdir -p "$_ZI_CONFIG_DIR"
+          echo "export GROQ_API_KEY=\"$_key\"" >> "$_ZSHRC"
+          export GROQ_API_KEY="$_key"
+          _s_ok "Key saved to $_ZSHRC"
+        else
+          _s_warn "Skipped. zi won't work until GROQ_API_KEY is set."
+        fi
+      fi
+
+      # ── Step 3: Workflow ───────────────────────────────────────────────
+      _s_line
+      _s_head "Step 3 of 5 — Your workflow"
+      _s_line
+      if [[ $_BEGINNER -eq 1 ]]; then
+        _s_info "zi will customize its command palette based on what you do."
+      fi
+      printf '  What best describes your work? (pick the closest one)\n\n'
+      printf '    1) Web / frontend  (HTML, CSS, JavaScript, React, etc.)\n'
+      printf '    2) Backend / APIs  (Node, Python, Go, databases)\n'
+      printf '    3) DevOps / infra  (Docker, Kubernetes, cloud)\n'
+      printf '    4) Data / ML       (Python, Jupyter, data pipelines)\n'
+      printf '    5) General / mixed (a bit of everything)\n'
+      _s_line
+      _s_input "Enter 1–5"
+      read -r _wf
+      case "$_wf" in
+        1) _WORKFLOW="web" ;;
+        2) _WORKFLOW="backend" ;;
+        3) _WORKFLOW="devops" ;;
+        4) _WORKFLOW="data" ;;
+        *) _WORKFLOW="general" ;;
+      esac
+      _s_ok "Workflow set to: $_WORKFLOW"
+
+      # ── Step 4: Tool detection + offers ───────────────────────────────
+      _s_line
+      _s_head "Step 4 of 5 — Terminal tools"
+      _s_line
+      _s_info "Checking what's installed..."
+      _s_line
+
+      # Tool definitions: name|brew-pkg|description|beginner-explanation
+      local -a _tools=(
+        "fzf|fzf|Fuzzy finder (required for zi palette)|Lets you search and select items interactively — zi uses it for its command menu"
+        "fd|fd|Faster, friendlier alternative to 'find'|Makes searching for files much easier than the built-in find command"
+        "rg|ripgrep|Faster grep — search file contents|Searches inside files blazing fast. Like Ctrl+F for your whole project"
+        "bat|bat|cat with syntax highlighting and line numbers|Makes reading files in the terminal much nicer — shows code in color"
+        "eza|eza|Better ls — colors, icons, git status|Replaces the basic file listing command with something actually readable"
+        "dust|dust|Visual disk usage — see what's eating your space|Shows you which folders are taking up space, visually"
+        "zoxide|zoxide|Smart directory jumping — learns your habits|Instead of typing full paths, just type 'z project' to jump there instantly"
+        "lazygit|lazygit|Git TUI — manage git visually in the terminal|A visual git interface that runs inside your terminal"
+        "atuin|atuin|Shell history database — better Ctrl+R search|Gives zi better access to your command history for smarter error fixing"
+      )
+
+      local _to_install=()
+      for _entry in "${_tools[@]}"; do
+        local _name="${_entry%%|*}"
+        local _rest="${_entry#*|}"
+        local _pkg="${_rest%%|*}"
+        local _rest2="${_rest#*|}"
+        local _desc="${_rest2%%|*}"
+        local _explain="${_rest2#*|}"
+
+        if command -v "$_name" &>/dev/null; then
+          _s_ok "$_name — already installed"
+        else
+          _s_line
+          printf '  \033[1;33m○\033[0m  \033[1m%s\033[0m — %s\n' "$_name" "$_desc"
+          if [[ $_BEGINNER -eq 1 ]]; then
+            _s_info "$_explain"
+          fi
+          if [[ -n "$_INSTALL_CMD" ]]; then
+            _s_ask "Install $_name?"
+            read -r _ans
+            [[ "$_ans" == y || "$_ans" == Y ]] && _to_install+=("$_pkg")
+          else
+            _s_warn "No package manager found. Install manually: $_name"
+          fi
+        fi
+      done
+
+      if [[ ${#_to_install[@]} -gt 0 ]]; then
+        _s_line
+        _s_info "Installing: ${_to_install[*]}"
+        _s_line
+        for _pkg in "${_to_install[@]}"; do
+          printf '  \033[2m$ %s %s\033[0m\n' "$_INSTALL_CMD" "$_pkg"
+          eval "$_INSTALL_CMD $_pkg" || _s_warn "Failed to install $_pkg — install manually later"
+        done
+      fi
+
+      # ── Step 5: Generate personalized palette ─────────────────────────
+      _s_line
+      _s_head "Step 5 of 5 — Personalizing your palette"
+      _s_line
+
+      mkdir -p "$_ZI_CONFIG_DIR"
+      local _palette_out=""
+
+      case "$_WORKFLOW" in
+        web)
+          _palette_out+="web     |npm run dev                   |Start dev server\n"
+          _palette_out+="web     |npm run build                 |Build for production\n"
+          _palette_out+="web     |npm install                   |Install dependencies\n"
+          _palette_out+="web     |npx prettier --write .        |Format all files\n"
+          _palette_out+="web     |npx eslint .                  |Lint project\n"
+          command -v node &>/dev/null && _palette_out+="web     |node --version                |Check Node version\n"
+          ;;
+        backend)
+          _palette_out+="server  |docker compose up -d          |Start all services\n"
+          _palette_out+="server  |docker compose down           |Stop all services\n"
+          _palette_out+="server  |docker compose logs -f        |Follow service logs\n"
+          _palette_out+="db      |docker exec -it postgres psql -U postgres|Connect to Postgres\n"
+          command -v python3 &>/dev/null && _palette_out+="python  |python3 -m venv .venv         |Create virtual env\n"
+          command -v python3 &>/dev/null && _palette_out+="python  |source .venv/bin/activate     |Activate virtual env\n"
+          command -v go &>/dev/null && _palette_out+="go      |go run .                      |Run Go project\n"
+          command -v go &>/dev/null && _palette_out+="go      |go test ./...                 |Run all tests\n"
+          ;;
+        devops)
+          command -v docker &>/dev/null && _palette_out+="docker  |docker ps                     |List running containers\n"
+          command -v docker &>/dev/null && _palette_out+="docker  |docker system prune -f        |Remove unused resources\n"
+          command -v kubectl &>/dev/null && _palette_out+="k8s     |kubectl get pods -A           |List all pods\n"
+          command -v kubectl &>/dev/null && _palette_out+="k8s     |kubectl get nodes             |List cluster nodes\n"
+          command -v terraform &>/dev/null && _palette_out+="tf      |terraform plan                |Preview infra changes\n"
+          command -v terraform &>/dev/null && _palette_out+="tf      |terraform apply               |Apply infra changes\n"
+          ;;
+        data)
+          command -v python3 &>/dev/null && _palette_out+="python  |python3 -m venv .venv         |Create virtual env\n"
+          command -v python3 &>/dev/null && _palette_out+="python  |pip install -r requirements.txt|Install dependencies\n"
+          command -v jupyter &>/dev/null && _palette_out+="jupyter |jupyter lab                   |Start JupyterLab\n"
+          _palette_out+="data    |python3 -c \"import pandas; print(pandas.__version__)\"|Check pandas version\n"
+          ;;
+      esac
+
+      # Add tools the user has installed
+      command -v lazygit &>/dev/null && _palette_out+="git     |lazygit                       |Git TUI\n"
+      command -v dust    &>/dev/null && _palette_out+="files   |dust                          |Visual disk usage\n"
+      command -v zoxide  &>/dev/null && _palette_out+="nav     |z <dir>                       |Smart jump (zoxide)\n"
+      command -v atuin   &>/dev/null && _palette_out+="history |atuin stats                   |Most-used commands\n"
+      command -v btm     &>/dev/null && _palette_out+="sys     |btm                           |System monitor (btm)\n"
+
+      if [[ -n "$_palette_out" ]]; then
+        printf '%b' "$_palette_out" > "$_ZI_PALETTE_FILE"
+        _s_ok "Palette saved to $_ZI_PALETTE_FILE"
+        _s_info "$(echo "$_palette_out" | wc -l | tr -d ' ') custom entries added based on your setup"
+      fi
+
+      # ── Done ────────────────────────────────────────────────────────────
+      _s_line
+      printf '\033[1;32m  All done! Here is your personalized quick-start:\033[0m\n'
+      _s_line
+
+      case "$_WORKFLOW" in
+        web)
+          _s_tip "zi start my dev server"
+          _s_tip "zi why is my npm install failing"
+          _s_tip "zi write a React hook that debounces input"
+          ;;
+        backend)
+          _s_tip "zi start my docker services"
+          _s_tip "zi why did my API return a 500 error"
+          _s_tip "zi write a Python function to paginate a database query"
+          ;;
+        devops)
+          _s_tip "zi list all running containers"
+          _s_tip "zi why is my pod crashing"
+          _s_tip "zi write a bash script to rotate log files"
+          ;;
+        data)
+          _s_tip "zi activate my virtual environment"
+          _s_tip "zi what does this pandas error mean"
+          _s_tip "zi write a script to load a CSV and show summary stats"
+          ;;
+        *)
+          _s_tip "zi ask me something in plain English"
+          _s_tip "zi fix  (after any command fails)"
+          _s_tip "zi      (open the command palette)"
+          ;;
+      esac
+
+      _s_line
+      if [[ $_BEGINNER -eq 1 ]]; then
+        _s_info "One more tip: if a command fails, just type 'zi fix' and"
+        _s_info "zi will explain what went wrong and how to fix it."
+        _s_line
+      fi
+      printf '  Restart your shell or run: \033[1msource ~/.zshrc\033[0m\n'
+      _s_line
+      ;;
+
+    *)
+      cat << 'HELP'
+zi — terminal intelligence
+
+  zi                  command palette
+  zi setup            interactive setup wizard (run this first)
+  zi <anything>       smart intent routing (auto-detects mode)
+  zi ask <q>          natural language → shell command
+  zi code <task>      generate code (Claude CLI or Groq)
+  zi edit <task>      Claude edits files autonomously (prompts for bash)
+  zi agent <task>     Claude fully autonomous — edits + runs commands
+  zi desc <cmd>       explain what a command/snippet does
+  zi fix              explain + fix last error
+  zi man <cmd>        summarize man page (10 practical bullets)
+  zi ? <text>         explain terminal output
+  zi explain <file>   explain what a file does
+  zi run <cmd>        run and copy output to clipboard
+  zi log [filter]     view recent queries (optional search term)
+  zi watch on|off     auto-fix on non-zero exit
+
+  Ctrl+Space          AI-correct current buffer (ZLE)
+
+  Config:
+  ZI_GROQ_KEY=<key>   Groq API key (or set GROQ_API_KEY)
+  ZI_MODEL=<id>       Override Groq model
+  ZI_CLAUDE=<path>    Path to claude CLI binary
+  ~/.config/zi/palette  Custom palette entries (appended to defaults)
+HELP
+      ;;
+  esac
+}
+
+_zi_main "$@"
