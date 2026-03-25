@@ -41,6 +41,8 @@ green "  Installed zi to $ZI_BIN/zi"
 mkdir -p "$ZI_ZSH_DIR"
 curl -fsSL "$ZI_REPO/zi.zsh" -o "$ZI_ZSH_DIR/zi.zsh"
 green "  Installed zi.zsh to $ZI_ZSH_DIR/zi.zsh"
+curl -fsSL "$ZI_REPO/_zi" -o "$ZI_ZSH_DIR/_zi"
+green "  Installed _zi completion to $ZI_ZSH_DIR/_zi"
 
 # ── Add to PATH if needed ──────────────────────────────────────────────────
 if [[ ":$PATH:" != *":$ZI_BIN:"* ]]; then

@@ -1,0 +1,66 @@
+#compdef zi
+# zsh tab completion for zi
+# Installed automatically by zi.zsh
+
+_zi() {
+  local state
+  local -a subcommands
+
+  subcommands=(
+    'ask:natural language → shell command'
+    'chat:persistent multi-turn conversation'
+    'code:generate code (Claude CLI or Groq)'
+    'desc:explain what a command does'
+    'edit:Claude edits files autonomously'
+    'agent:Claude fully autonomous (no prompts)'
+    'explain:explain what a file does'
+    'fix:explain and fix last error'
+    'log:view recent queries'
+    'man:summarize a man page'
+    'run:run command and copy output'
+    'setup:interactive setup wizard'
+    'update:update zi to latest version'
+    'version:show current version'
+    'watch:auto-fix on non-zero exit'
+  )
+
+  _arguments -C \
+    '1:subcommand:->subcmd' \
+    '*::args:->args'
+
+  case $state in
+    subcmd)
+      _describe 'zi subcommand' subcommands
+      ;;
+    args)
+      case $words[1] in
+        chat)
+          local -a sessions
+          local session_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zi/sessions"
+          if [[ -d "$session_dir" ]]; then
+            sessions=(${session_dir}/*.jsonl(N))
+            sessions=(${sessions[@]:t:r})
+          fi
+          _arguments '1:session:(list '"${sessions[*]}"')'
+          ;;
+        explain|edit)
+          _files
+          ;;
+        man)
+          _command_names -e
+          ;;
+        watch)
+          _arguments '1:state:(on off)'
+          ;;
+        log)
+          _arguments '1:filter:(ask fix desc code edit agent man explain run chat)'
+          ;;
+        agent|code|ask|desc|run)
+          _message 'task or query'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_zi "$@"

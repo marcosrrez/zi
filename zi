@@ -327,8 +327,7 @@ ENTRIES
 
       local _session="${_subcmd:-default}"
       local _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
-      local _system="$(_zi_context)
-You are zi, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
+      local _system_base="You are zi, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
 
       printf '\033[2mzi chat — session: \033[1;35m%s\033[0m\n' "$_session"
       if [[ -f "$_session_file" ]]; then
@@ -375,6 +374,7 @@ import json, sys
 print(json.dumps({'role': 'user', 'content': sys.argv[1]}))" "$_input" >> "$_session_file"
 
         # Build messages array from session file
+        # Build messages (capped at 40 to control token usage)
         local _messages
         _messages=$(python3 -c "
 import json, sys, os
@@ -384,7 +384,11 @@ if os.path.exists(path):
     for line in open(path):
         try: msgs.append(json.loads(line))
         except: pass
-print(json.dumps(msgs))" "$_session_file")
+print(json.dumps(msgs[-40:]))" "$_session_file")
+
+        # Re-inject fresh context on every turn (picks up cwd changes)
+        local _system="$(_zi_context)
+$_system_base"
 
         printf '\033[2mthinking...\033[0m'
         local _response
