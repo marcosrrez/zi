@@ -255,7 +255,7 @@ ENTRIES
 
       printf '\033[2mchecking for updates...\033[0m\n'
       local _remote_ver
-      _remote_ver=$(curl -sf "$_base/zi" | grep -m1 '^  local _ZI_VERSION=' | sed 's/.*"\([0-9.]*\)".*/\1/') || {
+      _remote_ver=$(curl -sf "$_base/VERSION" | tr -d '[:space:]') || {
         printf 'zi: could not reach GitHub\n' >&2; return 1
       }
 
