@@ -61,20 +61,14 @@ if ! grep -qF "zi/zi.zsh" "$ZSHRC" 2>/dev/null; then
   green "  Added zi.zsh source to $ZSHRC"
 fi
 
-# ── Run setup wizard ──────────────────────────────────────────────────────
+# ── Done ──────────────────────────────────────────────────────────────────
 echo ""
-yellow "  Run the setup wizard now? It takes ~2 minutes and personalizes"
-yellow "  zi for your workflow, detects your tools, and gets you ready to go."
+green "  zi installed successfully!"
 echo ""
-printf "  Run zi setup? [Y/n] "
-read -r run_setup
-if [[ "$run_setup" != n && "$run_setup" != N ]]; then
-  export PATH="$ZI_BIN:$PATH"
-  exec "$ZI_BIN/zi" setup
-else
-  green "  zi installed successfully!"
-  echo ""
-  echo "  Restart your shell or run:  source $ZSHRC"
-  echo "  Then run:                   zi setup"
-  echo ""
-fi
+echo "  Next steps:"
+echo "    1. Restart your shell:  source $ZSHRC"
+echo "    2. Run the setup wizard: zi setup"
+echo ""
+echo "  The setup wizard will configure your API key, detect your tools,"
+echo "  and personalize the command palette for your workflow."
+echo ""

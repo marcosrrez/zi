@@ -16,7 +16,7 @@ function zi() {
 
   if [[ -z "$1" ]]; then
     local result
-    result=$(command zi _palette 2>/dev/null)
+    result=$(command zi _palette </dev/tty 2>/dev/tty)
     [[ -z "$result" ]] && return 0
     if echo "$result" | grep -q '<'; then
       print -z "$result"       # has placeholder — load into buffer for editing
