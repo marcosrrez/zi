@@ -186,19 +186,25 @@ git     |git log --oneline --graph -20 |Commit graph (last 20)
 git     |git diff --staged             |Review staged changes
 git     |git stash                     |Stash current changes
 git     |git stash pop                 |Restore latest stash
-git     |lazygit                       |Git TUI (if installed)
+git     |git pull --rebase             |Pull and rebase on top
+git     |git push                      |Push current branch
 nav     |cd -                          |Jump to previous directory
 nav     |ls -la                        |List all files with details
+nav     |pwd                           |Show current directory
 files   |find . -name <pattern>        |Find files by name
-files   |rg <pattern>                  |Search file contents (ripgrep)
-files   |bat <file>                    |View file with syntax highlight
+files   |grep -r <pattern> .           |Search file contents (grep)
+files   |cat <file>                    |View file contents
+files   |cp -r <src> <dst>             |Copy file or directory
+files   |mv <src> <dst>                |Move or rename
+files   |rm -rf <path>                 |Delete file or directory
 files   |du -sh *                      |Directory sizes
-dev     |docker ps                     |List running containers
-dev     |docker compose up -d          |Start compose services
-dev     |npm run dev                   |Start dev server
-dev     |make                          |Run default make target
+files   |chmod +x <file>               |Make file executable
+sys     |ps aux | grep <name>          |Find a running process
+sys     |kill -9 <pid>                 |Force-kill a process
 sys     |top                           |System monitor
 sys     |df -h                         |Disk usage overview
+sys     |curl -fsSL <url>              |Download a URL
+sys     |ping -c 3 <host>              |Check connectivity
 zi      |zi <anything>                 |Smart intent routing
 zi      |zi ask <query>                |Natural language to command
 zi      |zi code <task>                |Generate code (Claude or Groq)
@@ -210,7 +216,6 @@ zi      |zi man <cmd>                  |Summarize man page
 zi      |zi chat                       |Start or resume a conversation
 zi      |zi chat list                  |List saved chat sessions
 zi      |zi watch on                   |Auto-fix on non-zero exit
-zi      |zi watch off                  |Disable auto-fix
 zi      |zi update                     |Update zi to latest version
 ENTRIES
   }
@@ -921,12 +926,24 @@ BANNER
           ;;
       esac
 
+      # ── Ctrl+Space spotlight ─────────────────────────────────────────────
+      _s_line
+      printf '\033[1;36m  ★ Secret weapon: Ctrl+Space\033[0m\n'
+      _s_line
+      _s_info "Type any command (even a wrong one), then press Ctrl+Space."
+      _s_info "zi will silently correct it in-place before you hit Enter."
       _s_line
       if [[ $_BEGINNER -eq 1 ]]; then
+        _s_info "Example: type  gti status  and press Ctrl+Space"
+        _s_info "         → zi rewrites it to  git status  instantly"
+        _s_line
         _s_info "One more tip: if a command fails, just type 'zi fix' and"
         _s_info "zi will explain what went wrong and how to fix it."
-        _s_line
+      else
+        _s_info "Works on half-typed commands, wrong flags, typos — anything."
+        _s_info "It reads your intent, not just the spelling."
       fi
+      _s_line
       printf '  Restart your shell or run: \033[1msource ~/.zshrc\033[0m\n'
       _s_line
       ;;

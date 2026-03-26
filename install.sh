@@ -4,6 +4,21 @@
 
 set -euo pipefail
 
+# ── Shell check ─────────────────────────────────────────────────────────────
+_current_shell="${SHELL##*/}"
+if [[ "$_current_shell" != "zsh" ]]; then
+  printf '\033[0;33m  Warning: your default shell is %s, not zsh.\033[0m\n' "$_current_shell"
+  printf '\033[0;33m  zi'\''s shell integration (palette, Ctrl+Space, watch) requires zsh.\033[0m\n'
+  echo ""
+  echo "  To switch to zsh:"
+  echo "    chsh -s \$(which zsh)"
+  echo "  Then log out and back in, and re-run this installer."
+  echo ""
+  printf '  Continue installing anyway? [y/N] '
+  read -r _shell_ans
+  [[ "$_shell_ans" != y && "$_shell_ans" != Y ]] && exit 0
+fi
+
 ZI_BIN="${ZI_BIN:-$HOME/.local/bin}"
 ZI_ZSH_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
 ZI_REPO="https://raw.githubusercontent.com/marcosrrez/zi/main"
