@@ -784,58 +784,141 @@ BANNER
       _s_line
       _s_head "Step 4 of 5 — Terminal tools"
       _s_line
-      _s_info "Checking what's installed..."
+      _s_info "The terminal has a modern toolset that makes everything faster."
+      _s_info "zi works better with these installed — let's see what you have."
       _s_line
 
-      # Tool definitions: name|brew-pkg|description|beginner-explanation
-      local -a _tools=(
-        "fzf|fzf|Fuzzy finder (required for zi palette)|Lets you search and select items interactively — zi uses it for its command menu"
-        "fd|fd|Faster, friendlier alternative to 'find'|Makes searching for files much easier than the built-in find command"
-        "rg|ripgrep|Faster grep — search file contents|Searches inside files blazing fast. Like Ctrl+F for your whole project"
-        "bat|bat|cat with syntax highlighting and line numbers|Makes reading files in the terminal much nicer — shows code in color"
-        "eza|eza|Better ls — colors, icons, git status|Replaces the basic file listing command with something actually readable"
-        "dust|dust|Visual disk usage — see what's eating your space|Shows you which folders are taking up space, visually"
-        "zoxide|zoxide|Smart directory jumping — learns your habits|Instead of typing full paths, just type 'z project' to jump there instantly"
-        "lazygit|lazygit|Git TUI — manage git visually in the terminal|A visual git interface that runs inside your terminal"
-        "atuin|atuin|Shell history database — better Ctrl+R search|Gives zi better access to your command history for smarter error fixing"
-      )
+      # ── Tier renderer ──────────────────────────────────────────────────
+      # _zi_tool_tier <tier_label> <tier_desc> tool1 tool2 ...
+      # Each tool entry: "bin|pkg|headline|what_you_get|before|after"
+      _zi_tool_tier() {
+        local _tier_label="$1" _tier_desc="$2"
+        shift 2
+        local -a _tier_tools=("$@")
+        local -a _missing_names _missing_pkgs
+        local _installed_count=0
 
-      local _to_install=()
-      for _entry in "${_tools[@]}"; do
-        local _name="${_entry%%|*}"
-        local _rest="${_entry#*|}"
-        local _pkg="${_rest%%|*}"
-        local _rest2="${_rest#*|}"
-        local _desc="${_rest2%%|*}"
-        local _explain="${_rest2#*|}"
+        printf '\n  \033[1;35m%s\033[0m  \033[2m%s\033[0m\n' "$_tier_label" "$_tier_desc"
+        printf '  %s\n' "─────────────────────────────────────────────────────"
 
-        if command -v "$_name" &>/dev/null; then
-          _s_ok "$_name — already installed"
-        else
-          _s_line
-          printf '  \033[1;33m○\033[0m  \033[1m%s\033[0m — %s\n' "$_name" "$_desc"
-          if [[ $_BEGINNER -eq 1 ]]; then
-            _s_info "$_explain"
-          fi
-          if [[ -n "$_INSTALL_CMD" ]]; then
-            _s_ask "Install $_name?"
-            read -r _ans
-            [[ "$_ans" == y || "$_ans" == Y ]] && _to_install+=("$_pkg")
+        for _entry in "${_tier_tools[@]}"; do
+          local _bin="${_entry%%|*}"
+          local _r1="${_entry#*|}"
+          local _pkg="${_r1%%|*}"
+          local _r2="${_r1#*|}"
+          local _headline="${_r2%%|*}"
+          local _r3="${_r2#*|}"
+          local _what="${_r3%%|*}"
+          local _r4="${_r3#*|}"
+          local _before="${_r4%%|*}"
+          local _after="${_r4#*|}"
+
+          if command -v "$_bin" &>/dev/null; then
+            printf '  \033[0;32m✔\033[0m  \033[1m%-12s\033[0m  %s\n' "$_bin" "$_headline"
+            (( _installed_count++ ))
           else
-            _s_warn "No package manager found. Install manually: $_name"
+            printf '  \033[2m○\033[0m  \033[1m%-12s\033[0m  \033[0;33m%s\033[0m\n' "$_bin" "$_headline"
+            _s_info "    $_what"
+            if [[ -n "$_before" && -n "$_after" ]]; then
+              printf '    \033[2mbefore →\033[0m  %s\n' "$_before"
+              printf '    \033[0;32mafter  →\033[0m  %s\n' "$_after"
+            fi
+            _missing_names+=("$_bin")
+            _missing_pkgs+=("$_pkg")
           fi
-        fi
-      done
-
-      if [[ ${#_to_install[@]} -gt 0 ]]; then
-        _s_line
-        _s_info "Installing: ${_to_install[*]}"
-        _s_line
-        for _pkg in "${_to_install[@]}"; do
-          printf '  \033[2m$ %s %s\033[0m\n' "$_INSTALL_CMD" "$_pkg"
-          eval "$_INSTALL_CMD $_pkg" || _s_warn "Failed to install $_pkg — install manually later"
         done
-      fi
+
+        if [[ ${#_missing_names[@]} -eq 0 ]]; then
+          _s_line
+          _s_ok "All $# tools in this tier already installed"
+          return 0
+        fi
+
+        if [[ -z "$_INSTALL_CMD" ]]; then
+          _s_line
+          _s_warn "No package manager found. Install manually:"
+          for _n in "${_missing_names[@]}"; do
+            _s_info "  $_n"
+          done
+          return 0
+        fi
+
+        _s_line
+        printf '  \033[1m%d missing.\033[0m  Install all? [Y/n/pick]\033[0m ' "${#_missing_names[@]}"
+        printf '  \033[2m(Y=yes, n=skip tier, pick=choose one by one)\033[0m\n'
+        printf '  › '
+        read -r _tier_ans
+        _tier_ans="${_tier_ans:-Y}"
+
+        case "${_tier_ans:u}" in
+          Y|YES)
+            _s_line
+            _s_info "Installing ${_missing_pkgs[*]}..."
+            _s_line
+            local _all_ok=1
+            for (( _ti=1; _ti<=${#_missing_pkgs[@]}; _ti++ )); do
+              local _p="${_missing_pkgs[$_ti]}"
+              local _n="${_missing_names[$_ti]}"
+              printf '  \033[2m▸ %s %s\033[0m\n' "$_INSTALL_CMD" "$_p"
+              if eval "$_INSTALL_CMD $_p" >/dev/null 2>&1; then
+                _s_ok "$_n installed"
+              else
+                _s_warn "$_n failed — install manually later: $_INSTALL_CMD $_p"
+                _all_ok=0
+              fi
+            done
+            ;;
+          N|NO)
+            _s_info "Skipped. You can install these later and re-run 'zi setup'."
+            ;;
+          PICK|P)
+            _s_line
+            for (( _ti=1; _ti<=${#_missing_pkgs[@]}; _ti++ )); do
+              local _p="${_missing_pkgs[$_ti]}"
+              local _n="${_missing_names[$_ti]}"
+              printf '  Install \033[1m%s\033[0m? [y/N] ' "$_n"
+              read -r _pick_ans
+              if [[ "$_pick_ans" == y || "$_pick_ans" == Y ]]; then
+                printf '  \033[2m▸ %s %s\033[0m\n' "$_INSTALL_CMD" "$_p"
+                if eval "$_INSTALL_CMD $_p" >/dev/null 2>&1; then
+                  _s_ok "$_n installed"
+                else
+                  _s_warn "$_n failed — install manually later"
+                fi
+              fi
+            done
+            ;;
+          *)
+            _s_info "Skipped."
+            ;;
+        esac
+      }
+
+      local _to_install=()  # unused now but kept for compat
+
+      # ── Tier 1: Essential ──────────────────────────────────────────────
+      _zi_tool_tier \
+        "ESSENTIAL" "zi requires this to work" \
+        "fzf|fzf|Fuzzy finder — powers the zi command palette|Without fzf, the zi palette (just type 'zi') won't work.|zi  →  (nothing appears)|zi  →  interactive searchable menu of 30+ commands"
+
+      # ── Tier 2: Recommended ────────────────────────────────────────────
+      _s_line
+      _zi_tool_tier \
+        "RECOMMENDED" "faster versions of tools you already use" \
+        "fd|fd|fd — a better 'find'|10x faster than find, with sane defaults and color output.|find . -name '*.js' -not -path '*/node_modules/*'|fd '*.js'" \
+        "rg|ripgrep|rg — a better 'grep'|Search file contents across a whole project in milliseconds.|grep -r 'TODO' . --include='*.py'|rg 'TODO' --type py" \
+        "bat|bat|bat — a better 'cat'|Shows files with syntax highlighting, line numbers, and git diff markers.|cat server.js  →  plain text wall|bat server.js  →  color, line numbers, git markers" \
+        "eza|eza|eza — a better 'ls'|Shows file sizes, git status, icons, and permissions at a glance.|ls -la  →  hard to scan|eza -la --git  →  colored, icons, git status per file"
+
+      # ── Tier 3: Power tools ────────────────────────────────────────────
+      _s_line
+      _zi_tool_tier \
+        "POWER TOOLS" "tools that change how you navigate and recover" \
+        "zoxide|zoxide|zoxide — smart 'cd' that learns|Remembers your most-visited dirs. Jump anywhere in 2-3 chars.|cd ~/developer/myproject/src/components|z comp  →  jumps there instantly" \
+        "lazygit|lazygit|lazygit — git in a visual TUI|Stage hunks, resolve conflicts, and push without memorizing git flags.|git add -p, git rebase -i, git push|lazygit  →  everything on one screen" \
+        "atuin|atuin|atuin — your entire history, searchable|Stores every command with timestamp, exit code, and cwd in SQLite.|Ctrl+R  →  only matches by prefix|Ctrl+R  →  fuzzy, filtered, context-aware" \
+        "dust|dust|dust — visual disk usage|See which directories are consuming space, as a tree.|du -sh *  →  unsorted numbers|dust  →  sorted visual bar chart" \
+        "btm|bottom|btm — system monitor (CPU/RAM/disk/net)|A nicer top with charts for CPU, memory, disk I/O, and network.|top  →  numbers only, hard to read|btm  →  sparklines, sortable, zoomable"
 
       # ── Step 5: Generate personalized palette ─────────────────────────
       _s_line
