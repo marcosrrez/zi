@@ -19,6 +19,7 @@ _zi() {
     'man:summarize a man page'
     'run:run command and copy output'
     'setup:interactive setup wizard'
+    'uninstall:remove zi from this machine'
     'update:update zi to latest version'
     'version:show current version'
     'watch:auto-fix on non-zero exit'

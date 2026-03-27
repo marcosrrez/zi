@@ -12,7 +12,7 @@ unset _zi_comp_dir
 
 # ── zi shell wrapper ───────────────────────────────────────────────────────
 function zi() {
-  local known_subcommands=(ask fix "?" run man log watch explain desc code edit agent chat setup update version --version -v _route _palette _entries _correct)
+  local known_subcommands=(ask fix "?" run man log watch explain desc code edit agent chat setup update uninstall version --version -v _route _palette _entries _correct)
 
   if [[ -z "$1" ]]; then
     local result

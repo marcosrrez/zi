@@ -2,7 +2,7 @@
 # zi — terminal intelligence layer
 # https://github.com/marcosrrez/zi
 # Modes: ask  fix  desc  code  edit  agent  man  ?  explain  run  log  watch
-#        setup  _route  _palette  _entries  _correct
+#        setup  uninstall  _route  _palette  _entries  _correct
 
 _zi_main() {
   local _ZI_VERSION="0.1.0"
@@ -310,6 +310,48 @@ ENTRIES
       curl -fsSL "$_base/zi.zsh" -o "$_zsh_path" 2>/dev/null || true
       printf '\033[0;32mUpdated to v%s\033[0m\n' "$_remote_ver"
       printf 'Restart your shell or run: source %s\n' "$_zsh_path"
+      ;;
+
+    "uninstall")
+      printf '\n  \033[1;31mUninstall zi\033[0m\n\n'
+      printf '  This will remove:\n'
+      printf '    • zi binary (%s)\n' "$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")"
+      printf '    • shell integration (%s)\n' "${XDG_CONFIG_HOME:-$HOME/.config}/zi/"
+      printf '    • history and sessions (%s)\n' "${XDG_DATA_HOME:-$HOME/.local/share}/zi/"
+      printf '    • source line from ~/.zshrc\n'
+      printf '\n  \033[1mAre you sure? [y/N]\033[0m '
+      read -r _un_ans
+      [[ "$_un_ans" != y && "$_un_ans" != Y ]] && { printf 'Cancelled.\n'; return 0; }
+
+      local _zi_bin
+      _zi_bin=$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")
+      local _zi_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
+      local _zi_data="${XDG_DATA_HOME:-$HOME/.local/share}/zi"
+      local _zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+
+      printf '\n'
+      rm -f "$_zi_bin" \
+        && printf '  \033[0;32m✔\033[0m  Binary removed\n' \
+        || printf '  \033[0;33m!\033[0m  Could not remove binary (check permissions)\n'
+
+      rm -rf "$_zi_cfg" \
+        && printf '  \033[0;32m✔\033[0m  Config dir removed\n' \
+        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_zi_cfg"
+
+      rm -rf "$_zi_data" \
+        && printf '  \033[0;32m✔\033[0m  Data dir removed\n' \
+        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_zi_data"
+
+      if [[ -f "$_zshrc" ]]; then
+        # Remove the zi source block (comment line + source line)
+        local _tmp
+        _tmp=$(mktemp)
+        grep -v '# zi shell integration\|zi/zi\.zsh' "$_zshrc" > "$_tmp" && mv "$_tmp" "$_zshrc" \
+          && printf '  \033[0;32m✔\033[0m  Removed zi source line from %s\n' "$_zshrc" \
+          || { rm -f "$_tmp"; printf '  \033[0;33m!\033[0m  Could not edit %s — remove zi lines manually\n' "$_zshrc"; }
+      fi
+
+      printf '\n  Uninstall complete. Restart your shell to finish cleaning up.\n\n'
       ;;
 
     "chat")
@@ -855,18 +897,29 @@ BANNER
             _s_line
             _s_info "Installing ${_missing_pkgs[*]}..."
             _s_line
-            local _all_ok=1
+            local _all_ok=1 _ok_count=0 _fail_count=0
             for (( _ti=1; _ti<=${#_missing_pkgs[@]}; _ti++ )); do
               local _p="${_missing_pkgs[$_ti]}"
               local _n="${_missing_names[$_ti]}"
               printf '  \033[2m▸ %s %s\033[0m\n' "$_INSTALL_CMD" "$_p"
+              printf '  \033[2m  installing... (may take a moment)\033[0m\r'
               if eval "$_INSTALL_CMD $_p" >/dev/null 2>&1; then
+                printf '  %-50s\r' " "   # clear the "installing..." line
                 _s_ok "$_n installed"
+                (( _ok_count++ ))
               else
-                _s_warn "$_n failed — install manually later: $_INSTALL_CMD $_p"
+                printf '  %-50s\r' " "
+                _s_warn "$_n failed — install manually: $_INSTALL_CMD $_p"
                 _all_ok=0
+                (( _fail_count++ ))
               fi
             done
+            _s_line
+            if [[ $_all_ok -eq 1 ]]; then
+              _s_ok "All $_ok_count package(s) installed successfully"
+            else
+              _s_warn "$_ok_count installed, $_fail_count failed — see warnings above"
+            fi
             ;;
           N|NO)
             _s_info "Skipped. You can install these later and re-run 'zi setup'."
@@ -1053,6 +1106,7 @@ zi — terminal intelligence
   zi log [filter]     view recent queries (optional search term)
   zi watch on|off     auto-fix on non-zero exit
   zi update           update zi to the latest version
+  zi uninstall        remove zi from this machine
   zi version          show current version
 
   Ctrl+Space          AI-correct current buffer (ZLE)
