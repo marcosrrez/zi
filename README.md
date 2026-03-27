@@ -31,6 +31,11 @@ The wizard takes about 2 minutes. It configures your API key, detects your workf
 
 **Requirements:** zsh, curl, python3, fzf
 
+> **zinit users:** zinit registers `zi` as an alias for itself. Add this line to your `.zshrc` after the zinit source line to reclaim the name:
+> ```zsh
+> unalias zi 2>/dev/null
+> ```
+
 ---
 
 ## Ctrl+Space — the headline feature
