@@ -42,7 +42,7 @@ _zi() {
             sessions=(${session_dir}/*.jsonl(N))
             sessions=(${sessions[@]:t:r})
           fi
-          _arguments '1:session:(list '"${sessions[*]}"')'
+          _arguments '1:subcommand:(list delete '"${sessions[*]}"')'
           ;;
         explain|edit)
           _files

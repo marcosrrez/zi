@@ -372,6 +372,27 @@ ENTRIES
         return 0
       fi
 
+      # zi chat delete <name>
+      if [[ "$_subcmd" == "delete" ]]; then
+        local _del_name="${2:-}"
+        [[ -z "$_del_name" ]] && { printf 'usage: zi chat delete <session-name>\n' >&2; return 1; }
+        local _del_file="$_ZI_SESSION_DIR/$_del_name.jsonl"
+        if [[ ! -f "$_del_file" ]]; then
+          printf 'zi: no session named "%s"\n' "$_del_name" >&2
+          printf 'Run "zi chat list" to see available sessions.\n' >&2
+          return 1
+        fi
+        printf 'Delete session "%s"? [y/N] ' "$_del_name"
+        read -r _del_ans
+        if [[ "$_del_ans" == y || "$_del_ans" == Y ]]; then
+          rm -f "$_del_file"
+          printf '\033[2mSession "%s" deleted.\033[0m\n' "$_del_name"
+        else
+          printf 'Cancelled.\n'
+        fi
+        return 0
+      fi
+
       local _session="${_subcmd:-default}"
       local _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
       local _system_base="You are zi, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
@@ -1094,6 +1115,7 @@ zi — terminal intelligence
   zi ask <q>          natural language → shell command
   zi chat [session]   persistent multi-turn conversation
   zi chat list        list all saved chat sessions
+  zi chat delete <n>  delete a saved chat session
   zi code <task>      generate code (Claude CLI or Groq)
   zi edit <task>      Claude edits files autonomously (prompts for bash)
   zi agent <task>     Claude fully autonomous — edits + runs commands
