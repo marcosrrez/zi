@@ -1,4 +1,4 @@
-# zi demo — record with: vhs demo.tape
+# psy demo — record with: vhs demo.tape
 # Install vhs: brew install vhs
 # Output: demo.gif
 
@@ -14,13 +14,13 @@ Set PlaybackSpeed 1.0
 
 # ── Intro ────────────────────────────────────────────────────────────────────
 Sleep 1s
-Type "# zi — terminal intelligence"
+Type "# psy — terminal intelligence"
 Sleep 2s
 Ctrl+C
 
 # ── 1. Ask: natural language to command ──────────────────────────────────────
 Sleep 500ms
-Type "zi find all files larger than 50MB in my home directory"
+Type "psy find all files larger than 50MB in my home directory"
 Sleep 1s
 Enter
 Sleep 3s
@@ -30,7 +30,7 @@ Sleep 500ms
 Type "git push"
 Enter
 Sleep 2s
-Type "zi fix"
+Type "psy fix"
 Enter
 Sleep 4s
 
@@ -47,7 +47,7 @@ Sleep 2500ms
 
 # ── 4. desc: explain a command ───────────────────────────────────────────────
 Sleep 500ms
-Type "zi desc git rebase -i HEAD~3"
+Type "psy desc git rebase -i HEAD~3"
 Enter
 Sleep 4s
 
@@ -57,7 +57,7 @@ Type "# Press Enter to open the command palette"
 Sleep 1500ms
 Ctrl+C
 Sleep 300ms
-Type "zi"
+Type "psy"
 Enter
 Sleep 2s
 Type "docker"

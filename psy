@@ -1,46 +1,46 @@
 #!/usr/bin/env zsh
-# zi — terminal intelligence layer
-# https://github.com/marcosrrez/zi
+# psy — terminal intelligence layer
+# https://github.com/marcosrrez/psy
 # Modes: ask  fix  desc  code  edit  agent  man  ?  explain  run  log  watch
 #        setup  uninstall  _route  _palette  _entries  _correct
 
-_zi_main() {
-  local _ZI_VERSION="0.1.0"
-  local _ZI_MODEL="${ZI_MODEL:-llama-3.3-70b-versatile}"
-  local _ZI_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/zi/history.jsonl"
-  local _ZI_LAST_CMD="${XDG_DATA_HOME:-$HOME/.local/share}/zi/last_cmd"
-  local _ZI_PALETTE="${XDG_CONFIG_HOME:-$HOME/.config}/zi/palette"
-  local _ZI_SESSION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zi/sessions"
-  local _ZI_DB="${XDG_DATA_HOME:-$HOME/.local/share}/atuin/history.db"
-  local _ZI_CLAUDE="${ZI_CLAUDE:-}"
+_psy_main() {
+  local _PSY_VERSION="0.1.0"
+  local _PSY_MODEL="${PSY_MODEL:-llama-3.3-70b-versatile}"
+  local _PSY_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/psy/history.jsonl"
+  local _PSY_LAST_CMD="${XDG_DATA_HOME:-$HOME/.local/share}/psy/last_cmd"
+  local _PSY_PALETTE="${XDG_CONFIG_HOME:-$HOME/.config}/psy/palette"
+  local _PSY_SESSION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/psy/sessions"
+  local _PSY_DB="${XDG_DATA_HOME:-$HOME/.local/share}/atuin/history.db"
+  local _PSY_CLAUDE="${PSY_CLAUDE:-}"
 
   # Resolve claude binary
-  if [[ -z "$_ZI_CLAUDE" ]]; then
+  if [[ -z "$_PSY_CLAUDE" ]]; then
     for _candidate in "$HOME/.local/bin/claude" "$(command -v claude 2>/dev/null)"; do
-      [[ -x "$_candidate" ]] && { _ZI_CLAUDE="$_candidate"; break; }
+      [[ -x "$_candidate" ]] && { _PSY_CLAUDE="$_candidate"; break; }
     done
   fi
 
   # Ensure data directories exist
-  mkdir -p "${_ZI_LOG:h}" "$_ZI_SESSION_DIR"
+  mkdir -p "${_PSY_LOG:h}" "$_PSY_SESSION_DIR"
 
   # Source API key if not in env
   [[ -z "${GROQ_API_KEY:-$GROQ:-}" ]] && [[ -f "$HOME/.api_keys" ]] && source "$HOME/.api_keys"
-  local _ZI_KEY="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+  local _PSY_KEY="${PSY_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
 
   # ── Groq API ───────────────────────────────────────────────────────────
-  _zi_groq() {
+  _psy_groq() {
     local prompt="$1" max_tokens="${2:-600}"
-    [[ -z "$_ZI_KEY" ]] && {
-      printf 'zi: GROQ_API_KEY not set. Get a free key at console.groq.com\n' >&2
+    [[ -z "$_PSY_KEY" ]] && {
+      printf 'psy: GROQ_API_KEY not set. Get a free key at console.groq.com\n' >&2
       return 1
     }
 
     local payload
-    payload=$(ZI_MODEL="$_ZI_MODEL" ZI_MAX="$max_tokens" python3 -c '
+    payload=$(PSY_MODEL="$_PSY_MODEL" ZI_MAX="$max_tokens" python3 -c '
 import json, sys, os
 print(json.dumps({
-  "model": os.environ["ZI_MODEL"],
+  "model": os.environ["PSY_MODEL"],
   "messages": [{"role": "user", "content": sys.stdin.read()}],
   "max_tokens": int(os.environ.get("ZI_MAX", "600")),
   "temperature": 0.3
@@ -48,27 +48,27 @@ print(json.dumps({
 
     local raw
     raw=$(curl -sf https://api.groq.com/openai/v1/chat/completions \
-      -H "Authorization: Bearer $_ZI_KEY" \
+      -H "Authorization: Bearer $_PSY_KEY" \
       -H "Content-Type: application/json" \
-      -d "$payload") || { printf 'zi: API request failed\n' >&2; return 1; }
+      -d "$payload") || { printf 'psy: API request failed\n' >&2; return 1; }
 
     python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 if 'error' in d:
-    print('zi: ' + d['error'].get('message', 'API error'), file=sys.stderr)
+    print('psy: ' + d['error'].get('message', 'API error'), file=sys.stderr)
     sys.exit(1)
 print(d['choices'][0]['message']['content'].strip())
 " <<< "$raw"
   }
 
   # ── Groq API — multi-turn chat ────────────────────────────────────────
-  _zi_groq_chat() {
+  _psy_groq_chat() {
     local messages_json="$1" system_prompt="$2" max_tokens="${3:-800}"
-    [[ -z "$_ZI_KEY" ]] && { printf 'zi: GROQ_API_KEY not set\n' >&2; return 1; }
+    [[ -z "$_PSY_KEY" ]] && { printf 'psy: GROQ_API_KEY not set\n' >&2; return 1; }
 
     local payload
-    payload=$(ZI_MODEL="$_ZI_MODEL" ZI_MAX="$max_tokens" python3 -c "
+    payload=$(PSY_MODEL="$_PSY_MODEL" ZI_MAX="$max_tokens" python3 -c "
 import json, sys, os
 messages = json.loads(sys.argv[1])
 system = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
@@ -77,7 +77,7 @@ if system:
     all_msgs.append({'role': 'system', 'content': system})
 all_msgs.extend(messages)
 print(json.dumps({
-  'model': os.environ['ZI_MODEL'],
+  'model': os.environ['PSY_MODEL'],
   'messages': all_msgs,
   'max_tokens': int(os.environ.get('ZI_MAX', '800')),
   'temperature': 0.7
@@ -86,22 +86,22 @@ print(json.dumps({
 
     local raw
     raw=$(curl -sf https://api.groq.com/openai/v1/chat/completions \
-      -H "Authorization: Bearer $_ZI_KEY" \
+      -H "Authorization: Bearer $_PSY_KEY" \
       -H "Content-Type: application/json" \
-      -d "$payload") || { printf 'zi: API request failed\n' >&2; return 1; }
+      -d "$payload") || { printf 'psy: API request failed\n' >&2; return 1; }
 
     python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 if 'error' in d:
-    print('zi: ' + d['error'].get('message', 'API error'), file=sys.stderr)
+    print('psy: ' + d['error'].get('message', 'API error'), file=sys.stderr)
     sys.exit(1)
 print(d['choices'][0]['message']['content'].strip())
 " <<< "$raw"
   }
 
   # ── Auto-detect installed tools for context ────────────────────────────
-  _zi_detect_tools() {
+  _psy_detect_tools() {
     local tools=()
     local candidates=(
       git gh docker brew npm node python3 ruby go cargo make cmake
@@ -115,17 +115,17 @@ print(d['choices'][0]['message']['content'].strip())
   }
 
   # ── Shell context injected into every prompt ───────────────────────────
-  _zi_context() {
+  _psy_context() {
     local branch os_name tools
     branch=$(git branch --show-current 2>/dev/null)
     os_name=$(uname -s)
-    tools=$(_zi_detect_tools)
+    tools=$(_psy_detect_tools)
     printf 'OS: %s, shell: zsh, cwd: %s%s\nAvailable tools: %s\n' \
       "$os_name" "$PWD" "${branch:+, git: $branch}" "$tools"
   }
 
   # ── Post-edit diff display ────────────────────────────────────────────
-  _zi_show_diff() {
+  _psy_show_diff() {
     git rev-parse --is-inside-work-tree &>/dev/null || return 0
     local changed
     changed=$(git diff --name-only 2>/dev/null)
@@ -156,30 +156,30 @@ print(d['choices'][0]['message']['content'].strip())
   }
 
   # ── Logging ────────────────────────────────────────────────────────────
-  _zi_log_entry() {
+  _psy_log_entry() {
     local mode="$1" query="$2" response="$3"
     python3 -c "
 import json, sys
 from datetime import datetime, timezone
 e = {'ts': datetime.now(timezone.utc).isoformat(), 'mode': sys.argv[1], 'query': sys.argv[2], 'response': sys.argv[3]}
 print(json.dumps(e))
-" "$mode" "$query" "$response" >> "$_ZI_LOG" 2>/dev/null
+" "$mode" "$query" "$response" >> "$_PSY_LOG" 2>/dev/null
   }
 
   # ── Last failed command (Atuin → preexec file → fc fallback) ─────────
-  _zi_last_failed() {
-    if [[ -f "$_ZI_DB" ]]; then
-      sqlite3 -separator '|' "$_ZI_DB" \
-        "SELECT command, exit FROM history WHERE command NOT LIKE 'zi%' AND exit != 0 ORDER BY timestamp DESC LIMIT 1;" 2>/dev/null
-    elif [[ -f "$_ZI_LAST_CMD" ]]; then
-      cat "$_ZI_LAST_CMD"
+  _psy_last_failed() {
+    if [[ -f "$_PSY_DB" ]]; then
+      sqlite3 -separator '|' "$_PSY_DB" \
+        "SELECT command, exit FROM history WHERE command NOT LIKE 'psy%' AND exit != 0 ORDER BY timestamp DESC LIMIT 1;" 2>/dev/null
+    elif [[ -f "$_PSY_LAST_CMD" ]]; then
+      cat "$_PSY_LAST_CMD"
     else
       fc -ln -1 2>/dev/null | sed 's/^[[:space:]]//'
     fi
   }
 
   # ── Default palette entries ────────────────────────────────────────────
-  _zi_default_entries() {
+  _psy_default_entries() {
     cat << 'ENTRIES'
 git     |git status                    |Working tree status
 git     |git log --oneline --graph -20 |Commit graph (last 20)
@@ -205,29 +205,29 @@ sys     |top                           |System monitor
 sys     |df -h                         |Disk usage overview
 sys     |curl -fsSL <url>              |Download a URL
 sys     |ping -c 3 <host>              |Check connectivity
-zi      |zi <anything>                 |Smart intent routing
-zi      |zi ask <query>                |Natural language to command
-zi      |zi code <task>                |Generate code (Claude or Groq)
-zi      |zi edit <task>                |Claude edits files autonomously
-zi      |zi agent <task>               |Claude fully autonomous
-zi      |zi desc <cmd>                 |Explain what a command does
-zi      |zi fix                        |Explain + fix last error
-zi      |zi man <cmd>                  |Summarize man page
-zi      |zi chat                       |Start or resume a conversation
-zi      |zi chat list                  |List saved chat sessions
-zi      |zi watch on                   |Auto-fix on non-zero exit
-zi      |zi update                     |Update zi to latest version
+psy      |psy <anything>                 |Smart intent routing
+psy      |psy ask <query>                |Natural language to command
+psy      |psy code <task>                |Generate code (Claude or Groq)
+psy      |psy edit <task>                |Claude edits files autonomously
+psy      |psy agent <task>               |Claude fully autonomous
+psy      |psy desc <cmd>                 |Explain what a command does
+psy      |psy fix                        |Explain + fix last error
+psy      |psy man <cmd>                  |Summarize man page
+psy      |psy chat                       |Start or resume a conversation
+psy      |psy chat list                  |List saved chat sessions
+psy      |psy watch on                   |Auto-fix on non-zero exit
+psy      |psy update                     |Update psy to latest version
 ENTRIES
   }
 
   # ── Palette entries (defaults + user overrides) ────────────────────────
-  _zi_entries() {
-    _zi_default_entries
-    [[ -f "$_ZI_PALETTE" ]] && cat "$_ZI_PALETTE"
+  _psy_entries() {
+    _psy_default_entries
+    [[ -f "$_PSY_PALETTE" ]] && cat "$_PSY_PALETTE"
   }
 
   # ── Intent router ──────────────────────────────────────────────────────
-  _zi_route() {
+  _psy_route() {
     local input="$*"
     local lower="${input:l}"
     local first_word="${input%% *}"
@@ -235,18 +235,18 @@ ENTRIES
     # File path that exists → explain
     if [[ "$first_word" == /* || "$first_word" == ~* || "$first_word" == ./* ]]; then
       local resolved="${first_word/#\~/$HOME}"
-      [[ -f "$resolved" ]] && { _zi_main explain "$resolved"; return; }
+      [[ -f "$resolved" ]] && { _psy_main explain "$resolved"; return; }
     fi
 
     # Error/failure intent → fix
     if echo "$lower" | grep -qE '(why.*(fail|error|broke|not work|crash)|fix (this|the|my)|what.*(went wrong|is wrong))'; then
-      _zi_main fix
+      _psy_main fix
       return
     fi
 
     # File editing intent → edit
     if echo "$lower" | grep -qE '^(refactor|add|remove|update|rename|fix|change|edit|modify).*(in |to |the ).*(\.js|\.ts|\.py|\.sh|\.zsh|\.md|\.json|\.yaml|\.go|\.rb|file|function|class|component)'; then
-      _zi_main edit "$input"
+      _psy_main edit "$input"
       return
     fi
 
@@ -256,99 +256,99 @@ ENTRIES
       subject=$(echo "$input" | sed -E 's/^(what does|explain|describe|what is) //i' \
                               | sed -E 's/ (command|flag|option|do)\??$//i' \
                               | awk '{print $1}')
-      [[ -n "$subject" ]] && { _zi_main desc "$subject"; return; }
+      [[ -n "$subject" ]] && { _psy_main desc "$subject"; return; }
     fi
 
     # Known CLI binary with few words → desc
     local known_clis=(git ls find grep awk sed curl wget ssh docker brew npm node python python3 ruby go cargo make cmake gcc ffmpeg rsync tar jq yq fzf fd rg bat eza dust duf zoxide lazygit gh kubectl terraform)
     if (( ${known_clis[(Ie)$first_word]} )) && [[ $(echo "$input" | wc -w) -le 6 ]]; then
-      _zi_main desc "$input"
+      _psy_main desc "$input"
       return
     fi
 
     # Code generation → code
     if echo "$lower" | grep -qE '^(write|create|build|generate|make me|scaffold|draft).*(script|function|class|program|tool|app|api|server|cli|hook|plugin|module|file)'; then
-      _zi_main code "$input"
+      _psy_main code "$input"
       return
     fi
 
     # Default → ask
-    _zi_main ask "$input"
+    _psy_main ask "$input"
   }
 
   # ── Modes ──────────────────────────────────────────────────────────────
   case "$1" in
 
     "version"|"--version"|"-v")
-      printf 'zi v%s\n' "$_ZI_VERSION"
+      printf 'psy v%s\n' "$_PSY_VERSION"
       ;;
 
     "update")
       local _bin_path
-      _bin_path=$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")
-      local _zsh_path="${XDG_CONFIG_HOME:-$HOME/.config}/zi/zi.zsh"
-      local _base="https://raw.githubusercontent.com/marcosrrez/zi/main"
+      _bin_path=$(command -v psy 2>/dev/null || printf '%s/.local/bin/psy' "$HOME")
+      local _zsh_path="${XDG_CONFIG_HOME:-$HOME/.config}/psy/psy.zsh"
+      local _base="https://raw.githubusercontent.com/marcosrrez/psy/main"
 
       printf '\033[2mchecking for updates...\033[0m\n'
       local _remote_ver
       _remote_ver=$(curl -sf "$_base/VERSION" | tr -d '[:space:]') || {
-        printf 'zi: could not reach GitHub\n' >&2; return 1
+        printf 'psy: could not reach GitHub\n' >&2; return 1
       }
 
-      if [[ "$_remote_ver" == "$_ZI_VERSION" ]]; then
-        printf 'zi is up to date (v%s)\n' "$_ZI_VERSION"
+      if [[ "$_remote_ver" == "$_PSY_VERSION" ]]; then
+        printf 'psy is up to date (v%s)\n' "$_PSY_VERSION"
         return 0
       fi
 
-      printf 'Updating v%s → v%s\n' "$_ZI_VERSION" "$_remote_ver"
-      curl -fsSL "$_base/zi" -o "${_bin_path}.tmp" \
+      printf 'Updating v%s → v%s\n' "$_PSY_VERSION" "$_remote_ver"
+      curl -fsSL "$_base/psy" -o "${_bin_path}.tmp" \
         && chmod +x "${_bin_path}.tmp" \
         && mv "${_bin_path}.tmp" "$_bin_path" || {
           rm -f "${_bin_path}.tmp"
-          printf 'zi: update failed\n' >&2; return 1
+          printf 'psy: update failed\n' >&2; return 1
         }
-      curl -fsSL "$_base/zi.zsh" -o "$_zsh_path" 2>/dev/null || true
+      curl -fsSL "$_base/psy.zsh" -o "$_zsh_path" 2>/dev/null || true
       printf '\033[0;32mUpdated to v%s\033[0m\n' "$_remote_ver"
       printf 'Restart your shell or run: source %s\n' "$_zsh_path"
       ;;
 
     "uninstall")
-      printf '\n  \033[1;31mUninstall zi\033[0m\n\n'
+      printf '\n  \033[1;31mUninstall psy\033[0m\n\n'
       printf '  This will remove:\n'
-      printf '    • zi binary (%s)\n' "$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")"
-      printf '    • shell integration (%s)\n' "${XDG_CONFIG_HOME:-$HOME/.config}/zi/"
-      printf '    • history and sessions (%s)\n' "${XDG_DATA_HOME:-$HOME/.local/share}/zi/"
+      printf '    • psy binary (%s)\n' "$(command -v psy 2>/dev/null || printf '%s/.local/bin/psy' "$HOME")"
+      printf '    • shell integration (%s)\n' "${XDG_CONFIG_HOME:-$HOME/.config}/psy/"
+      printf '    • history and sessions (%s)\n' "${XDG_DATA_HOME:-$HOME/.local/share}/psy/"
       printf '    • source line from ~/.zshrc\n'
       printf '\n  \033[1mAre you sure? [y/N]\033[0m '
       read -r _un_ans
       [[ "$_un_ans" != y && "$_un_ans" != Y ]] && { printf 'Cancelled.\n'; return 0; }
 
-      local _zi_bin
-      _zi_bin=$(command -v zi 2>/dev/null || printf '%s/.local/bin/zi' "$HOME")
-      local _zi_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
-      local _zi_data="${XDG_DATA_HOME:-$HOME/.local/share}/zi"
+      local _psy_bin
+      _psy_bin=$(command -v psy 2>/dev/null || printf '%s/.local/bin/psy' "$HOME")
+      local _psy_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/psy"
+      local _psy_data="${XDG_DATA_HOME:-$HOME/.local/share}/psy"
       local _zshrc="${ZDOTDIR:-$HOME}/.zshrc"
 
       printf '\n'
-      rm -f "$_zi_bin" \
+      rm -f "$_psy_bin" \
         && printf '  \033[0;32m✔\033[0m  Binary removed\n' \
         || printf '  \033[0;33m!\033[0m  Could not remove binary (check permissions)\n'
 
-      rm -rf "$_zi_cfg" \
+      rm -rf "$_psy_cfg" \
         && printf '  \033[0;32m✔\033[0m  Config dir removed\n' \
-        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_zi_cfg"
+        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_psy_cfg"
 
-      rm -rf "$_zi_data" \
+      rm -rf "$_psy_data" \
         && printf '  \033[0;32m✔\033[0m  Data dir removed\n' \
-        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_zi_data"
+        || printf '  \033[0;33m!\033[0m  Could not remove %s\n' "$_psy_data"
 
       if [[ -f "$_zshrc" ]]; then
-        # Remove the zi source block (comment line + source line)
+        # Remove the psy source block (comment line + source line)
         local _tmp
         _tmp=$(mktemp)
-        grep -v '# zi shell integration\|zi/zi\.zsh' "$_zshrc" > "$_tmp" && mv "$_tmp" "$_zshrc" \
-          && printf '  \033[0;32m✔\033[0m  Removed zi source line from %s\n' "$_zshrc" \
-          || { rm -f "$_tmp"; printf '  \033[0;33m!\033[0m  Could not edit %s — remove zi lines manually\n' "$_zshrc"; }
+        grep -v '# psy shell integration\|psy/psy\.zsh' "$_zshrc" > "$_tmp" && mv "$_tmp" "$_zshrc" \
+          && printf '  \033[0;32m✔\033[0m  Removed psy source line from %s\n' "$_zshrc" \
+          || { rm -f "$_tmp"; printf '  \033[0;33m!\033[0m  Could not edit %s — remove psy lines manually\n' "$_zshrc"; }
       fi
 
       printf '\n  Uninstall complete. Restart your shell to finish cleaning up.\n\n'
@@ -358,28 +358,28 @@ ENTRIES
       shift
       local _subcmd="$1"
 
-      # zi chat list
+      # psy chat list
       if [[ "$_subcmd" == "list" ]]; then
         local _found=0
-        for _f in "$_ZI_SESSION_DIR"/*.jsonl(N); do
+        for _f in "$_PSY_SESSION_DIR"/*.jsonl(N); do
           local _name="${_f:t:r}"
           local _count
           _count=$(wc -l < "$_f" | tr -d ' ')
           printf '  \033[1;35m%-20s\033[0m %s messages\n' "$_name" "$(( _count / 2 ))"
           _found=1
         done
-        [[ $_found -eq 0 ]] && printf 'zi: no chat sessions yet\n'
+        [[ $_found -eq 0 ]] && printf 'psy: no chat sessions yet\n'
         return 0
       fi
 
-      # zi chat delete <name>
+      # psy chat delete <name>
       if [[ "$_subcmd" == "delete" ]]; then
         local _del_name="${2:-}"
-        [[ -z "$_del_name" ]] && { printf 'usage: zi chat delete <session-name>\n' >&2; return 1; }
-        local _del_file="$_ZI_SESSION_DIR/$_del_name.jsonl"
+        [[ -z "$_del_name" ]] && { printf 'usage: psy chat delete <session-name>\n' >&2; return 1; }
+        local _del_file="$_PSY_SESSION_DIR/$_del_name.jsonl"
         if [[ ! -f "$_del_file" ]]; then
-          printf 'zi: no session named "%s"\n' "$_del_name" >&2
-          printf 'Run "zi chat list" to see available sessions.\n' >&2
+          printf 'psy: no session named "%s"\n' "$_del_name" >&2
+          printf 'Run "psy chat list" to see available sessions.\n' >&2
           return 1
         fi
         printf 'Delete session "%s"? [y/N] ' "$_del_name"
@@ -394,8 +394,8 @@ ENTRIES
       fi
 
       local _session="${_subcmd:-default}"
-      local _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
-      local _system_base="You are zi, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
+      local _session_file="$_PSY_SESSION_DIR/$_session.jsonl"
+      local _system_base="You are psy, a helpful terminal assistant. Be concise. When suggesting shell commands, put them on their own line prefixed with \$."
 
       printf '\033[2mzi chat — session: \033[1;35m%s\033[0m\n' "$_session"
       if [[ -f "$_session_file" ]]; then
@@ -416,12 +416,12 @@ ENTRIES
             printf '\033[2msession saved: %s\033[0m\n' "$_session"
             break ;;
           /list)
-            _zi_main chat list; continue ;;
+            _psy_main chat list; continue ;;
           /new*)
             local _new="${_input#/new}"
             _new="${_new## }"
             _session="${_new:-default}"
-            _session_file="$_ZI_SESSION_DIR/$_session.jsonl"
+            _session_file="$_PSY_SESSION_DIR/$_session.jsonl"
             printf '\033[2mswitched to: %s\033[0m\n' "$_session"
             continue ;;
           /clear)
@@ -455,16 +455,16 @@ if os.path.exists(path):
 print(json.dumps(msgs[-40:]))" "$_session_file")
 
         # Re-inject fresh context on every turn (picks up cwd changes)
-        local _system="$(_zi_context)
+        local _system="$(_psy_context)
 $_system_base"
 
         printf '\033[2mthinking...\033[0m'
         local _response
-        _response=$(_zi_groq_chat "$_messages" "$_system") || { printf '\r\033[K'; continue; }
+        _response=$(_psy_groq_chat "$_messages" "$_system") || { printf '\r\033[K'; continue; }
         printf '\r\033[K'
 
         printf '\033[1;36mzi  › \033[0m%s\n\n' "$_response"
-        _zi_log_entry "chat" "$_input" "$_response"
+        _psy_log_entry "chat" "$_input" "$_response"
 
         # Append assistant response
         python3 -c "
@@ -474,12 +474,12 @@ print(json.dumps({'role': 'assistant', 'content': sys.argv[1]}))" "$_response" >
       ;;
 
     "_palette")
-      _zi_entries \
+      _psy_entries \
         | fzf \
           --delimiter='|' \
           --with-nth='1,3' \
           --nth='2,3' \
-          --prompt='zi › ' \
+          --prompt='psy › ' \
           --height='40%' \
           --border='rounded' \
           --color='prompt:#c6a0f6,pointer:#ed8796,border:#363a4f,hl:#eed49f,hl+:#eed49f,info:#6e738d' \
@@ -491,28 +491,28 @@ print(json.dumps({'role': 'assistant', 'content': sys.argv[1]}))" "$_response" >
       ;;
 
     "_entries")
-      _zi_entries
+      _psy_entries
       ;;
 
     "_correct")
       shift
       [[ -z "$*" ]] && return 0
-      _zi_groq "Fix typos or syntax errors in this shell command on $(uname -s). Reply with ONLY the corrected command, no backticks, no explanation:
+      _psy_groq "Fix typos or syntax errors in this shell command on $(uname -s). Reply with ONLY the corrected command, no backticks, no explanation:
 $*"
       ;;
 
     "_route")
       shift
-      _zi_route "$@"
+      _psy_route "$@"
       ;;
 
     "ask")
       shift
       local q="$*"
-      [[ -z "$q" ]] && { printf 'zi ask › '; read -r q; }
+      [[ -z "$q" ]] && { printf 'psy ask › '; read -r q; }
       printf '\033[2mthinking...\033[0m\n'
       local cmd
-      cmd=$(_zi_groq "$(_zi_context)
+      cmd=$(_psy_groq "$(_psy_context)
 
 Convert to a shell one-liner (pipes, subshells, and command substitution are fine). Reply with ONLY the command, no backticks, no explanation:
 $q") || return 1
@@ -520,15 +520,15 @@ $q") || return 1
       printf 'Run? [y/N/c=copy] '
       read -r ans
       case "$ans" in
-        y|Y) _zi_log_entry "ask" "$q" "$cmd"; eval "$cmd" ;;
-        c|C) printf '%s' "$cmd" | pbcopy; printf '\033[2mcopied\033[0m\n'; _zi_log_entry "ask" "$q" "$cmd" ;;
-        *)   _zi_log_entry "ask" "$q" "$cmd" ;;
+        y|Y) _psy_log_entry "ask" "$q" "$cmd"; eval "$cmd" ;;
+        c|C) printf '%s' "$cmd" | pbcopy; printf '\033[2mcopied\033[0m\n'; _psy_log_entry "ask" "$q" "$cmd" ;;
+        *)   _psy_log_entry "ask" "$q" "$cmd" ;;
       esac
       ;;
 
     "fix")
       local raw_last cmd exit_code err
-      raw_last=$(_zi_last_failed)
+      raw_last=$(_psy_last_failed)
       if [[ "$raw_last" == *'|'* ]]; then
         cmd="${raw_last%%|*}"
         exit_code="${raw_last##*|}"
@@ -543,13 +543,13 @@ $q") || return 1
         err=$(tmux capture-pane -p -S - 2>/dev/null | tail -60)
       else
         printf '\033[2mlast failed: %s (exit: %s)\033[0m\n' "$cmd" "$exit_code"
-        printf 'Paste error output (Ctrl+D to skip, or pipe: cmd 2>&1 | zi fix):\n'
+        printf 'Paste error output (Ctrl+D to skip, or pipe: cmd 2>&1 | psy fix):\n'
         err=$(cat)
       fi
 
       printf '\033[2manalyzing...\033[0m\n'
       local response
-      response=$(_zi_groq "Command: $cmd
+      response=$(_psy_groq "Command: $cmd
 Exit code: $exit_code
 Error output:
 $err
@@ -558,85 +558,85 @@ Reply in this exact format:
 Issue: <one line explanation>
 Fix:   <corrected command only>") || return 1
       printf '\n%s\n\n' "$response"
-      _zi_log_entry "fix" "$cmd" "$response"
+      _psy_log_entry "fix" "$cmd" "$response"
       ;;
 
     "desc")
       shift
-      [[ -z "$*" ]] && { printf 'Usage: zi desc <command or snippet>\n'; return 1; }
+      [[ -z "$*" ]] && { printf 'Usage: psy desc <command or snippet>\n'; return 1; }
       printf '\033[2mexplaining...\033[0m\n'
       local response
-      response=$(_zi_groq "Explain what this shell command or snippet does, in plain English. One sentence summary, then bullet any non-obvious flags or behaviors. No preamble:
+      response=$(_psy_groq "Explain what this shell command or snippet does, in plain English. One sentence summary, then bullet any non-obvious flags or behaviors. No preamble:
 $*" 300) || return 1
       printf '\n%s\n\n' "$response"
-      _zi_log_entry "desc" "$*" "$response"
+      _psy_log_entry "desc" "$*" "$response"
       ;;
 
     "code")
       shift
       local q="$*"
-      [[ -z "$q" ]] && { printf 'zi code › '; read -r q; }
-      if [[ -x "$_ZI_CLAUDE" ]]; then
+      [[ -z "$q" ]] && { printf 'psy code › '; read -r q; }
+      if [[ -x "$_PSY_CLAUDE" ]]; then
         printf '\033[2mrouting to Claude...\033[0m\n'
-        local prompt="$(_zi_context)
+        local prompt="$(_psy_context)
 
 Write clean, working code for the following task. Include only the code and brief inline comments where non-obvious. No preamble, no markdown fences:
 $q"
-        _zi_log_entry "code" "$q" "(claude)"
-        printf '%s' "$prompt" | "$_ZI_CLAUDE" --print -
+        _psy_log_entry "code" "$q" "(claude)"
+        printf '%s' "$prompt" | "$_PSY_CLAUDE" --print -
       else
         printf '\033[2mthinking...\033[0m\n'
         local response
-        response=$(_zi_groq "$(_zi_context)
+        response=$(_psy_groq "$(_psy_context)
 
 Write clean, working code for the following task. Include only the code and brief inline comments where non-obvious. No preamble:
 $q" 1200) || return 1
         printf '\n%s\n\n' "$response"
-        _zi_log_entry "code" "$q" "$response"
+        _psy_log_entry "code" "$q" "$response"
       fi
       ;;
 
     "edit")
       shift
       local q="$*"
-      [[ -z "$q" ]] && { printf 'zi edit › '; read -r q; }
-      [[ ! -x "$_ZI_CLAUDE" ]] && { printf 'zi: claude CLI not found. Install Claude Code to use zi edit.\n' >&2; return 1; }
+      [[ -z "$q" ]] && { printf 'psy edit › '; read -r q; }
+      [[ ! -x "$_PSY_CLAUDE" ]] && { printf 'psy: claude CLI not found. Install Claude Code to use psy edit.\n' >&2; return 1; }
       printf '\033[2mzi edit — Claude will edit files autonomously (bash requires approval)\033[0m\n'
       printf '\033[2mtask: %s\033[0m\n\n' "$q"
-      _zi_log_entry "edit" "$q" "(claude:acceptEdits)"
-      "$_ZI_CLAUDE" --permission-mode acceptEdits "$q"
-      _zi_show_diff
+      _psy_log_entry "edit" "$q" "(claude:acceptEdits)"
+      "$_PSY_CLAUDE" --permission-mode acceptEdits "$q"
+      _psy_show_diff
       ;;
 
     "agent")
       shift
       local q="$*"
-      [[ -z "$q" ]] && { printf 'zi agent › '; read -r q; }
-      [[ ! -x "$_ZI_CLAUDE" ]] && { printf 'zi: claude CLI not found. Install Claude Code to use zi agent.\n' >&2; return 1; }
-      printf '\033[1;33mWARNING: zi agent bypasses all permission checks.\033[0m\n'
+      [[ -z "$q" ]] && { printf 'psy agent › '; read -r q; }
+      [[ ! -x "$_PSY_CLAUDE" ]] && { printf 'psy: claude CLI not found. Install Claude Code to use psy agent.\n' >&2; return 1; }
+      printf '\033[1;33mWARNING: psy agent bypasses all permission checks.\033[0m\n'
       printf '\033[1;33mClaude will edit files and run commands without asking.\033[0m\n'
       printf 'Continue? [y/N] '
       read -r confirm
       [[ "$confirm" != y && "$confirm" != Y ]] && { printf '\033[2maborted\033[0m\n'; return 0; }
       printf '\n\033[2mzi agent — running autonomously...\033[0m\n\n'
-      _zi_log_entry "agent" "$q" "(claude:bypassPermissions)"
-      "$_ZI_CLAUDE" --permission-mode bypassPermissions "$q"
-      _zi_show_diff
+      _psy_log_entry "agent" "$q" "(claude:bypassPermissions)"
+      "$_PSY_CLAUDE" --permission-mode bypassPermissions "$q"
+      _psy_show_diff
       ;;
 
     "man")
       shift
-      [[ -z "$1" ]] && { printf 'Usage: zi man <command>\n'; return 1; }
+      [[ -z "$1" ]] && { printf 'Usage: psy man <command>\n'; return 1; }
       local mantext
       mantext=$(man "$1" 2>/dev/null | col -bx | head -200) || {
-        printf 'zi: no man page for %s\n' "$1" >&2; return 1
+        printf 'psy: no man page for %s\n' "$1" >&2; return 1
       }
       printf '\033[2mreading %s man page...\033[0m\n' "$1"
       local response
-      response=$(_zi_groq "Summarize the most useful flags and common usage patterns for '$1'. 10 bullet points max, practical examples only, no preamble:
+      response=$(_psy_groq "Summarize the most useful flags and common usage patterns for '$1'. 10 bullet points max, practical examples only, no preamble:
 $mantext" 300) || return 1
       printf '\n%s\n\n' "$response"
-      _zi_log_entry "man" "$1" "$response"
+      _psy_log_entry "man" "$1" "$response"
       ;;
 
     "?")
@@ -647,49 +647,49 @@ $mantext" 300) || return 1
       else
         text="$*"
       fi
-      [[ -z "$text" ]] && { printf 'Usage: zi ? <text>  or  cmd | zi ?\n'; return 1; }
+      [[ -z "$text" ]] && { printf 'Usage: psy ? <text>  or  cmd | psy ?\n'; return 1; }
       printf '\033[2mexplaining...\033[0m\n'
       local response
-      response=$(_zi_groq "Explain what this terminal output means and what action (if any) to take. Be concise. No preamble:
+      response=$(_psy_groq "Explain what this terminal output means and what action (if any) to take. Be concise. No preamble:
 $text" 200) || return 1
       printf '\n%s\n\n' "$response"
-      _zi_log_entry "?" "$text" "$response"
+      _psy_log_entry "?" "$text" "$response"
       ;;
 
     "explain")
       shift
       local target="$1"
-      [[ -z "$target" ]] && { printf 'Usage: zi explain <file>\n'; return 1; }
-      [[ ! -f "$target" ]] && { printf 'zi: file not found: %s\n' "$target" >&2; return 1; }
+      [[ -z "$target" ]] && { printf 'Usage: psy explain <file>\n'; return 1; }
+      [[ ! -f "$target" ]] && { printf 'psy: file not found: %s\n' "$target" >&2; return 1; }
       local content
       content=$(head -200 "$target")
       printf '\033[2mexplaining %s...\033[0m\n' "$target"
       local response
-      response=$(_zi_groq "Explain what this file does in plain English. What it is, what it does, and any non-obvious details. No preamble:
+      response=$(_psy_groq "Explain what this file does in plain English. What it is, what it does, and any non-obvious details. No preamble:
 --- $target ---
 $content" 400) || return 1
       printf '\n%s\n\n' "$response"
-      _zi_log_entry "explain" "$target" "$response"
+      _psy_log_entry "explain" "$target" "$response"
       ;;
 
     "run")
       shift
-      [[ -z "$*" ]] && { printf 'Usage: zi run <command>\n'; return 1; }
+      [[ -z "$*" ]] && { printf 'Usage: psy run <command>\n'; return 1; }
       local out code
       out=$(zsh -c "$*" 2>&1); code=$?
       printf '%s\n' "$out"
       printf '%s' "$out" | pbcopy 2>/dev/null || printf '%s' "$out" | xclip -selection clipboard 2>/dev/null
       printf '\033[2mcopied to clipboard\033[0m\n'
-      _zi_log_entry "run" "$*" "$out"
+      _psy_log_entry "run" "$*" "$out"
       return $code
       ;;
 
     "log")
-      [[ -f "$_ZI_LOG" ]] || { printf 'zi: no history yet\n'; return 0; }
+      [[ -f "$_PSY_LOG" ]] || { printf 'psy: no history yet\n'; return 0; }
       local filter="${2:-}"
       python3 -c "
 import json, sys
-lines = open('$_ZI_LOG').readlines()
+lines = open('$_PSY_LOG').readlines()
 filt = sys.argv[1].lower() if len(sys.argv) > 1 else ''
 matches = []
 for line in lines:
@@ -710,9 +710,9 @@ for e in matches[-20:]:
     "watch")
       shift
       case "$1" in
-        on)  touch "$HOME/.zi_watch";  printf '\033[2mzi watch enabled\033[0m\n' ;;
-        off) rm -f "$HOME/.zi_watch";  printf '\033[2mzi watch disabled\033[0m\n' ;;
-        *)   [[ -f "$HOME/.zi_watch" ]] && printf 'zi watch: on\n' || printf 'zi watch: off\n' ;;
+        on)  touch "$HOME/.psy_watch";  printf '\033[2mzi watch enabled\033[0m\n' ;;
+        off) rm -f "$HOME/.psy_watch";  printf '\033[2mzi watch disabled\033[0m\n' ;;
+        *)   [[ -f "$HOME/.psy_watch" ]] && printf 'psy watch: on\n' || printf 'psy watch: off\n' ;;
       esac
       ;;
 
@@ -727,8 +727,8 @@ for e in matches[-20:]:
       _s_input() { printf '  \033[1m%s\033[0m › ' "$*"; }
       _s_tip()   { printf '  \033[0;36m→\033[0m  %s\n' "$*"; }
 
-      local _ZI_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
-      local _ZI_PALETTE_FILE="$_ZI_CONFIG_DIR/palette"
+      local _PSY_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/psy"
+      local _PSY_PALETTE_FILE="$_PSY_CONFIG_DIR/palette"
       local _ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
       local _BEGINNER=0
       local _WORKFLOW=""
@@ -748,13 +748,13 @@ for e in matches[-20:]:
       cat << 'BANNER'
 
        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-           zi — terminal intelligence
+           psy — terminal intelligence
        ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
 
 BANNER
       printf '\033[0m'
       _s_info "Let's get you set up. This takes about 2 minutes."
-      _s_info "You can re-run 'zi setup' any time to change your config."
+      _s_info "You can re-run 'psy setup' any time to change your config."
       _s_line
 
       # ── Step 1: Experience level ───────────────────────────────────────
@@ -776,12 +776,12 @@ BANNER
       if [[ $_BEGINNER -eq 1 ]]; then
         _s_line
         _s_info "Got it. I'll explain things as we go."
-        _s_info "zi is a tool that lets you talk to your terminal in plain English."
+        _s_info "psy is a tool that lets you talk to your terminal in plain English."
         _s_info "Instead of memorizing commands, you just describe what you want."
         _s_line
-        _s_tip "Example: zi find all files larger than 100MB"
-        _s_tip "Example: zi why did that fail"
-        _s_tip "Example: zi write a script to rename all my photos"
+        _s_tip "Example: psy find all files larger than 100MB"
+        _s_tip "Example: psy why did that fail"
+        _s_tip "Example: psy write a script to rename all my photos"
       fi
 
       # ── Step 2: API key ────────────────────────────────────────────────
@@ -789,17 +789,17 @@ BANNER
       _s_head "Step 2 of 5 — Groq API key"
       _s_line
 
-      local _current_key="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+      local _current_key="${PSY_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
       if [[ -z "$_current_key" ]] && [[ -f "$HOME/.api_keys" ]]; then
         source "$HOME/.api_keys" 2>/dev/null
-        _current_key="${ZI_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
+        _current_key="${PSY_GROQ_KEY:-${GROQ_API_KEY:-${GROQ:-}}}"
       fi
 
       if [[ -n "$_current_key" ]]; then
         _s_ok "Groq API key found (${_current_key:0:8}...)"
       else
         if [[ $_BEGINNER -eq 1 ]]; then
-          _s_info "zi uses Groq to understand your requests. Groq is free."
+          _s_info "psy uses Groq to understand your requests. Groq is free."
           _s_info "Go to console.groq.com, sign up, and create an API key."
           _s_info "It takes about 60 seconds and costs nothing."
         else
@@ -809,12 +809,12 @@ BANNER
         _s_input "Paste your Groq API key (Enter to skip)"
         read -r _key
         if [[ -n "$_key" ]]; then
-          mkdir -p "$_ZI_CONFIG_DIR"
+          mkdir -p "$_PSY_CONFIG_DIR"
           echo "export GROQ_API_KEY=\"$_key\"" >> "$_ZSHRC"
           export GROQ_API_KEY="$_key"
           _s_ok "Key saved to $_ZSHRC"
         else
-          _s_warn "Skipped. zi won't work until GROQ_API_KEY is set."
+          _s_warn "Skipped. psy won't work until GROQ_API_KEY is set."
         fi
       fi
 
@@ -823,7 +823,7 @@ BANNER
       _s_head "Step 3 of 5 — Your workflow"
       _s_line
       if [[ $_BEGINNER -eq 1 ]]; then
-        _s_info "zi will customize its command palette based on what you do."
+        _s_info "psy will customize its command palette based on what you do."
       fi
       printf '  What best describes your work? (pick the closest one)\n\n'
       printf '    1) Web / frontend  (HTML, CSS, JavaScript, React, etc.)\n'
@@ -848,13 +848,13 @@ BANNER
       _s_head "Step 4 of 5 — Terminal tools"
       _s_line
       _s_info "The terminal has a modern toolset that makes everything faster."
-      _s_info "zi works better with these installed — let's see what you have."
+      _s_info "psy works better with these installed — let's see what you have."
       _s_line
 
       # ── Tier renderer ──────────────────────────────────────────────────
-      # _zi_tool_tier <tier_label> <tier_desc> tool1 tool2 ...
+      # _psy_tool_tier <tier_label> <tier_desc> tool1 tool2 ...
       # Each tool entry: "bin|pkg|headline|what_you_get|before|after"
-      _zi_tool_tier() {
+      _psy_tool_tier() {
         local _tier_label="$1" _tier_desc="$2"
         shift 2
         local -a _tier_tools=("$@")
@@ -943,7 +943,7 @@ BANNER
             fi
             ;;
           N|NO)
-            _s_info "Skipped. You can install these later and re-run 'zi setup'."
+            _s_info "Skipped. You can install these later and re-run 'psy setup'."
             ;;
           PICK|P)
             _s_line
@@ -971,13 +971,13 @@ BANNER
       local _to_install=()  # unused now but kept for compat
 
       # ── Tier 1: Essential ──────────────────────────────────────────────
-      _zi_tool_tier \
-        "ESSENTIAL" "zi requires this to work" \
-        "fzf|fzf|Fuzzy finder — powers the zi command palette|Without fzf, the zi palette (just type 'zi') won't work.|zi  →  (nothing appears)|zi  →  interactive searchable menu of 30+ commands"
+      _psy_tool_tier \
+        "ESSENTIAL" "psy requires this to work" \
+        "fzf|fzf|Fuzzy finder — powers the psy command palette|Without fzf, the psy palette (just type 'psy') won't work.|psy  →  (nothing appears)|psy  →  interactive searchable menu of 30+ commands"
 
       # ── Tier 2: Recommended ────────────────────────────────────────────
       _s_line
-      _zi_tool_tier \
+      _psy_tool_tier \
         "RECOMMENDED" "faster versions of tools you already use" \
         "fd|fd|fd — a better 'find'|10x faster than find, with sane defaults and color output.|find . -name '*.js' -not -path '*/node_modules/*'|fd '*.js'" \
         "rg|ripgrep|rg — a better 'grep'|Search file contents across a whole project in milliseconds.|grep -r 'TODO' . --include='*.py'|rg 'TODO' --type py" \
@@ -986,7 +986,7 @@ BANNER
 
       # ── Tier 3: Power tools ────────────────────────────────────────────
       _s_line
-      _zi_tool_tier \
+      _psy_tool_tier \
         "POWER TOOLS" "tools that change how you navigate and recover" \
         "zoxide|zoxide|zoxide — smart 'cd' that learns|Remembers your most-visited dirs. Jump anywhere in 2-3 chars.|cd ~/developer/myproject/src/components|z comp  →  jumps there instantly" \
         "lazygit|lazygit|lazygit — git in a visual TUI|Stage hunks, resolve conflicts, and push without memorizing git flags.|git add -p, git rebase -i, git push|lazygit  →  everything on one screen" \
@@ -999,7 +999,7 @@ BANNER
       _s_head "Step 5 of 5 — Personalizing your palette"
       _s_line
 
-      mkdir -p "$_ZI_CONFIG_DIR"
+      mkdir -p "$_PSY_CONFIG_DIR"
       local _palette_out=""
 
       case "$_WORKFLOW" in
@@ -1045,8 +1045,8 @@ BANNER
       command -v btm     &>/dev/null && _palette_out+="sys     |btm                           |System monitor (btm)\n"
 
       if [[ -n "$_palette_out" ]]; then
-        printf '%b' "$_palette_out" > "$_ZI_PALETTE_FILE"
-        _s_ok "Palette saved to $_ZI_PALETTE_FILE"
+        printf '%b' "$_palette_out" > "$_PSY_PALETTE_FILE"
+        _s_ok "Palette saved to $_PSY_PALETTE_FILE"
         _s_info "$(echo "$_palette_out" | wc -l | tr -d ' ') custom entries added based on your setup"
       fi
 
@@ -1057,29 +1057,29 @@ BANNER
 
       case "$_WORKFLOW" in
         web)
-          _s_tip "zi start my dev server"
-          _s_tip "zi why is my npm install failing"
-          _s_tip "zi write a React hook that debounces input"
+          _s_tip "psy start my dev server"
+          _s_tip "psy why is my npm install failing"
+          _s_tip "psy write a React hook that debounces input"
           ;;
         backend)
-          _s_tip "zi start my docker services"
-          _s_tip "zi why did my API return a 500 error"
-          _s_tip "zi write a Python function to paginate a database query"
+          _s_tip "psy start my docker services"
+          _s_tip "psy why did my API return a 500 error"
+          _s_tip "psy write a Python function to paginate a database query"
           ;;
         devops)
-          _s_tip "zi list all running containers"
-          _s_tip "zi why is my pod crashing"
-          _s_tip "zi write a bash script to rotate log files"
+          _s_tip "psy list all running containers"
+          _s_tip "psy why is my pod crashing"
+          _s_tip "psy write a bash script to rotate log files"
           ;;
         data)
-          _s_tip "zi activate my virtual environment"
-          _s_tip "zi what does this pandas error mean"
-          _s_tip "zi write a script to load a CSV and show summary stats"
+          _s_tip "psy activate my virtual environment"
+          _s_tip "psy what does this pandas error mean"
+          _s_tip "psy write a script to load a CSV and show summary stats"
           ;;
         *)
-          _s_tip "zi ask me something in plain English"
-          _s_tip "zi fix  (after any command fails)"
-          _s_tip "zi      (open the command palette)"
+          _s_tip "psy ask me something in plain English"
+          _s_tip "psy fix  (after any command fails)"
+          _s_tip "psy      (open the command palette)"
           ;;
       esac
 
@@ -1088,14 +1088,14 @@ BANNER
       printf '\033[1;36m  ★ Secret weapon: Ctrl+Space\033[0m\n'
       _s_line
       _s_info "Type any command (even a wrong one), then press Ctrl+Space."
-      _s_info "zi will silently correct it in-place before you hit Enter."
+      _s_info "psy will silently correct it in-place before you hit Enter."
       _s_line
       if [[ $_BEGINNER -eq 1 ]]; then
         _s_info "Example: type  gti status  and press Ctrl+Space"
-        _s_info "         → zi rewrites it to  git status  instantly"
+        _s_info "         → psy rewrites it to  git status  instantly"
         _s_line
-        _s_info "One more tip: if a command fails, just type 'zi fix' and"
-        _s_info "zi will explain what went wrong and how to fix it."
+        _s_info "One more tip: if a command fails, just type 'psy fix' and"
+        _s_info "psy will explain what went wrong and how to fix it."
       else
         _s_info "Works on half-typed commands, wrong flags, typos — anything."
         _s_info "It reads your intent, not just the spelling."
@@ -1107,40 +1107,40 @@ BANNER
 
     *)
       cat << 'HELP'
-zi — terminal intelligence
+psy — terminal intelligence
 
-  zi                  command palette
-  zi setup            interactive setup wizard (run this first)
-  zi <anything>       smart intent routing (auto-detects mode)
-  zi ask <q>          natural language → shell command
-  zi chat [session]   persistent multi-turn conversation
-  zi chat list        list all saved chat sessions
-  zi chat delete <n>  delete a saved chat session
-  zi code <task>      generate code (Claude CLI or Groq)
-  zi edit <task>      Claude edits files autonomously (prompts for bash)
-  zi agent <task>     Claude fully autonomous — edits + runs commands
-  zi desc <cmd>       explain what a command/snippet does
-  zi fix              explain + fix last error
-  zi man <cmd>        summarize man page (10 practical bullets)
-  zi ? <text>         explain terminal output
-  zi explain <file>   explain what a file does
-  zi run <cmd>        run and copy output to clipboard
-  zi log [filter]     view recent queries (optional search term)
-  zi watch on|off     auto-fix on non-zero exit
-  zi update           update zi to the latest version
-  zi uninstall        remove zi from this machine
-  zi version          show current version
+  psy                  command palette
+  psy setup            interactive setup wizard (run this first)
+  psy <anything>       smart intent routing (auto-detects mode)
+  psy ask <q>          natural language → shell command
+  psy chat [session]   persistent multi-turn conversation
+  psy chat list        list all saved chat sessions
+  psy chat delete <n>  delete a saved chat session
+  psy code <task>      generate code (Claude CLI or Groq)
+  psy edit <task>      Claude edits files autonomously (prompts for bash)
+  psy agent <task>     Claude fully autonomous — edits + runs commands
+  psy desc <cmd>       explain what a command/snippet does
+  psy fix              explain + fix last error
+  psy man <cmd>        summarize man page (10 practical bullets)
+  psy ? <text>         explain terminal output
+  psy explain <file>   explain what a file does
+  psy run <cmd>        run and copy output to clipboard
+  psy log [filter]     view recent queries (optional search term)
+  psy watch on|off     auto-fix on non-zero exit
+  psy update           update psy to the latest version
+  psy uninstall        remove psy from this machine
+  psy version          show current version
 
   Ctrl+Space          AI-correct current buffer (ZLE)
 
   Config:
-  ZI_GROQ_KEY=<key>   Groq API key (or set GROQ_API_KEY)
-  ZI_MODEL=<id>       Override Groq model
-  ZI_CLAUDE=<path>    Path to claude CLI binary
-  ~/.config/zi/palette  Custom palette entries (appended to defaults)
+  PSY_GROQ_KEY=<key>   Groq API key (or set GROQ_API_KEY)
+  PSY_MODEL=<id>       Override Groq model
+  PSY_CLAUDE=<path>    Path to claude CLI binary
+  ~/.config/psy/palette  Custom palette entries (appended to defaults)
 HELP
       ;;
   esac
 }
 
-_zi_main "$@"
+_psy_main "$@"

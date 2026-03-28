@@ -1,8 +1,8 @@
-#compdef zi
-# zsh tab completion for zi
-# Installed automatically by zi.zsh
+#compdef psy
+# zsh tab completion for psy
+# Installed automatically by psy.zsh
 
-_zi() {
+_psy() {
   local state
   local -a subcommands
 
@@ -19,8 +19,8 @@ _zi() {
     'man:summarize a man page'
     'run:run command and copy output'
     'setup:interactive setup wizard'
-    'uninstall:remove zi from this machine'
-    'update:update zi to latest version'
+    'uninstall:remove psy from this machine'
+    'update:update psy to latest version'
     'version:show current version'
     'watch:auto-fix on non-zero exit'
   )
@@ -31,13 +31,13 @@ _zi() {
 
   case $state in
     subcmd)
-      _describe 'zi subcommand' subcommands
+      _describe 'psy subcommand' subcommands
       ;;
     args)
       case $words[1] in
         chat)
           local -a sessions
-          local session_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zi/sessions"
+          local session_dir="${XDG_DATA_HOME:-$HOME/.local/share}/psy/sessions"
           if [[ -d "$session_dir" ]]; then
             sessions=(${session_dir}/*.jsonl(N))
             sessions=(${sessions[@]:t:r})
@@ -64,4 +64,4 @@ _zi() {
   esac
 }
 
-_zi "$@"
+_psy "$@"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# zi installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/marcosrrez/zi/main/install.sh | bash
+# psy installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/marcosrrez/psy/main/install.sh | bash
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ set -euo pipefail
 _current_shell="${SHELL##*/}"
 if [[ "$_current_shell" != "zsh" ]]; then
   printf '\033[0;33m  Warning: your default shell is %s, not zsh.\033[0m\n' "$_current_shell"
-  printf '\033[0;33m  zi'\''s shell integration (palette, Ctrl+Space, watch) requires zsh.\033[0m\n'
+  printf '\033[0;33m  psy'\''s shell integration (palette, Ctrl+Space, watch) requires zsh.\033[0m\n'
   echo ""
   echo "  To switch to zsh:"
   echo "    chsh -s \$(which zsh)"
@@ -19,9 +19,9 @@ if [[ "$_current_shell" != "zsh" ]]; then
   [[ "$_shell_ans" != y && "$_shell_ans" != Y ]] && exit 0
 fi
 
-ZI_BIN="${ZI_BIN:-$HOME/.local/bin}"
-ZI_ZSH_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zi"
-ZI_REPO="https://raw.githubusercontent.com/marcosrrez/zi/main"
+PSY_BIN="${PSY_BIN:-$HOME/.local/bin}"
+PSY_ZSH_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/psy"
+PSY_REPO="https://raw.githubusercontent.com/marcosrrez/psy/main"
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
 
 green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
@@ -30,7 +30,7 @@ red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
 dim()    { printf '\033[2m%s\033[0m\n' "$*"; }
 
 echo ""
-echo "  zi — terminal intelligence"
+echo "  psy — terminal intelligence"
 echo "  ─────────────────────────"
 echo ""
 
@@ -47,42 +47,42 @@ fi
 green "  Dependencies OK"
 
 # ── Install binary ─────────────────────────────────────────────────────────
-mkdir -p "$ZI_BIN"
-curl -fsSL "$ZI_REPO/zi" -o "$ZI_BIN/zi"
-chmod +x "$ZI_BIN/zi"
-green "  Installed zi to $ZI_BIN/zi"
+mkdir -p "$PSY_BIN"
+curl -fsSL "$PSY_REPO/psy" -o "$PSY_BIN/psy"
+chmod +x "$PSY_BIN/psy"
+green "  Installed psy to $PSY_BIN/psy"
 
 # ── Install shell integration ──────────────────────────────────────────────
-mkdir -p "$ZI_ZSH_DIR"
-curl -fsSL "$ZI_REPO/zi.zsh" -o "$ZI_ZSH_DIR/zi.zsh"
-green "  Installed zi.zsh to $ZI_ZSH_DIR/zi.zsh"
-curl -fsSL "$ZI_REPO/_zi" -o "$ZI_ZSH_DIR/_zi"
-green "  Installed _zi completion to $ZI_ZSH_DIR/_zi"
+mkdir -p "$PSY_ZSH_DIR"
+curl -fsSL "$PSY_REPO/psy.zsh" -o "$PSY_ZSH_DIR/psy.zsh"
+green "  Installed psy.zsh to $PSY_ZSH_DIR/psy.zsh"
+curl -fsSL "$PSY_REPO/_psy" -o "$PSY_ZSH_DIR/_psy"
+green "  Installed _psy completion to $PSY_ZSH_DIR/_psy"
 
 # ── Add to PATH if needed ──────────────────────────────────────────────────
-if [[ ":$PATH:" != *":$ZI_BIN:"* ]]; then
+if [[ ":$PATH:" != *":$PSY_BIN:"* ]]; then
   echo "" >> "$ZSHRC"
-  echo "# zi" >> "$ZSHRC"
+  echo "# psy" >> "$ZSHRC"
   echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$ZSHRC"
-  green "  Added $ZI_BIN to PATH in $ZSHRC"
+  green "  Added $PSY_BIN to PATH in $ZSHRC"
 fi
 
 # ── Source shell integration ───────────────────────────────────────────────
-ZSHRC_SOURCE_LINE="source \"\${XDG_CONFIG_HOME:-\$HOME/.config}/zi/zi.zsh\""
-if ! grep -qF "zi/zi.zsh" "$ZSHRC" 2>/dev/null; then
+ZSHRC_SOURCE_LINE="source \"\${XDG_CONFIG_HOME:-\$HOME/.config}/psy/psy.zsh\""
+if ! grep -qF "psy/psy.zsh" "$ZSHRC" 2>/dev/null; then
   echo "" >> "$ZSHRC"
-  echo "# zi shell integration (palette, Ctrl+Space, watch)" >> "$ZSHRC"
+  echo "# psy shell integration (palette, Ctrl+Space, watch)" >> "$ZSHRC"
   echo "$ZSHRC_SOURCE_LINE" >> "$ZSHRC"
-  green "  Added zi.zsh source to $ZSHRC"
+  green "  Added psy.zsh source to $ZSHRC"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────
 echo ""
-green "  zi installed successfully!"
+green "  psy installed successfully!"
 echo ""
 echo "  Next steps:"
 echo "    1. Restart your shell:  source $ZSHRC"
-echo "    2. Run the setup wizard: zi setup"
+echo "    2. Run the setup wizard: psy setup"
 echo ""
 echo "  The setup wizard will configure your API key, detect your tools,"
 echo "  and personalize the command palette for your workflow."
